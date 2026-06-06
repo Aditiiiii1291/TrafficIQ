@@ -6,7 +6,7 @@ This project simulates traffic priority decisions. It does not control real traf
 
 ## Current Status
 
-Phase 2 - Computer Vision Foundation
+Phase 4 - Ambulance Detection Infrastructure
 
 Completed:
 
@@ -19,6 +19,12 @@ Completed:
 - OpenCV video loading foundation added
 - Frame extraction and basic frame annotation added
 - Annotated output video saving added
+- YOLOv8n vehicle detection added for car, motorcycle, bus, and truck
+- Bounding boxes and confidence labels added
+- CSV detection logs added
+- Separate ambulance detector module added
+- Emergency presence helper added
+- Combined vehicle plus ambulance detection pipeline added
 
 ## Technology Stack
 
@@ -53,8 +59,13 @@ AI-Emergency-Vehicle-Priority-System/
   frontend/
     .gitkeep
   ml/
+    __init__.py
     .gitkeep
     cv_pipeline.py
+    detectors/
+      __init__.py
+      ambulance_detector.py
+      vehicle_detector.py
   tests/
     .gitkeep
   .gitignore
@@ -148,6 +159,151 @@ The Streamlit app will be added in a later phase. Once created, the expected com
 streamlit run frontend/app.py
 ```
 
+## Vehicle Detection
+
+Phase 3 uses YOLOv8n to detect the following COCO vehicle classes:
+
+- `car`
+- `motorcycle`
+- `bus`
+- `truck`
+
+Ambulance-specific detection is handled separately by the Phase 4 ambulance detector so the generic vehicle detector stays focused on COCO vehicle classes.
+
+### Run YOLOv8n Vehicle Detection
+
+Place a sample traffic video in `data/raw/`, then run:
+
+```powershell
+python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --output data/processed/vehicle_detection_output.mp4 --log data/logs/vehicle_detections.csv
+```
+
+For a quick CPU-friendly test:
+
+```powershell
+python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --output data/processed/vehicle_detection_output.mp4 --log data/logs/vehicle_detections.csv --max-frames 100
+```
+
+To skip two frames after each processed frame:
+
+```powershell
+python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --skip-frames 2
+```
+
+To adjust the confidence threshold:
+
+```powershell
+python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --confidence 0.45
+```
+
+To display annotated frames:
+
+```powershell
+python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --display
+```
+
+The reusable frame-level detector API is:
+
+```python
+annotated_frame, detections = detect_vehicles(frame)
+```
+
+The first YOLOv8n run may download `yolov8n.pt` if the weight file is not already available locally.
+
+### Detection Log Format
+
+Vehicle detections are written to CSV with these columns:
+
+```text
+source_video,frame_index,timestamp_seconds,class_id,class_name,confidence,xmin,ymin,xmax,ymax,box_width,box_height
+```
+
+Each row represents one detected vehicle in one processed frame.
+
+## Ambulance Detection
+
+Phase 4 adds ambulance detection infrastructure in `ml/detectors/ambulance_detector.py`.
+
+This module is separate from the generic vehicle detector. It does not change the Phase 3 vehicle-only pipeline, and it does not claim ambulance detection accuracy until a real ambulance model and test dataset are evaluated.
+
+### Ambulance Model Requirements
+
+The ambulance detector expects a custom YOLO model trained or configured to detect ambulances.
+
+Default model path:
+
+```text
+data/models/ambulance_detector.pt
+```
+
+You can override the model path with:
+
+```powershell
+python ml/detectors/ambulance_detector.py --ambulance-model data/models/custom_ambulance.pt --input data/raw/sample_traffic.mp4
+```
+
+Or set:
+
+```powershell
+$env:AMBULANCE_MODEL_PATH="data/models/custom_ambulance.pt"
+```
+
+If the model class names include `ambulance`, `emergency vehicle`, or `emergency_vehicle`, that class is used. If class metadata is unavailable, the detector assumes class ID `0`, which is common for single-class custom YOLO models.
+
+### Reusable Ambulance API
+
+```python
+annotated_frame, ambulance_detections = detect_ambulances(frame)
+```
+
+Each ambulance detection uses this format:
+
+```python
+{
+    "class_name": "ambulance",
+    "confidence": 0.0,
+    "bbox": [xmin, ymin, xmax, ymax],
+}
+```
+
+Emergency presence helper:
+
+```python
+is_emergency_present(ambulance_detections)
+```
+
+Returns `True` when at least one ambulance detection exists, otherwise `False`.
+
+### Run Combined Vehicle and Ambulance Detection
+
+```powershell
+python ml/detectors/ambulance_detector.py --input data/raw/sample_traffic.mp4 --output data/processed/emergency_detection_output.mp4 --log data/logs/emergency_detections.csv --max-frames 100
+```
+
+To skip two frames after each processed frame:
+
+```powershell
+python ml/detectors/ambulance_detector.py --input data/raw/sample_traffic.mp4 --skip-frames 2
+```
+
+Expected output:
+
+- Annotated output video at `data/processed/emergency_detection_output.mp4`
+- Combined CSV log at `data/logs/emergency_detections.csv`
+- Vehicle boxes from the generic vehicle detector
+- Distinct ambulance boxes labeled `AMBULANCE`
+- Frame-level status overlay showing `Emergency Vehicle: DETECTED` or `Emergency Vehicle: NONE`
+
+### Combined CSV Log Format
+
+Vehicle and ambulance detections use the same CSV columns:
+
+```text
+source_video,frame_index,timestamp_seconds,class_id,class_name,confidence,xmin,ymin,xmax,ymax,box_width,box_height
+```
+
+Ambulance rows use `class_name` set to `ambulance`.
+
 ## Development Phases
 
 1. Project Setup
@@ -172,11 +328,32 @@ streamlit run frontend/app.py
 6. Run again with `--frames-dir data/processed/frames` and confirm JPG frames are created.
 7. Optionally run with `--display` and confirm processed frames appear with frame number, FPS, and timestamp overlays.
 
-## Phase 3 Preview
+## Phase 3 Testing Steps
 
-Phase 3 will add YOLOv8n vehicle detection:
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Add a short traffic video to `data/raw/`.
+3. Run `python ml/detectors/vehicle_detector.py --input data/raw/sample_traffic.mp4 --max-frames 100`.
+4. Confirm `data/processed/vehicle_detection_output.mp4` is created.
+5. Confirm the output video shows bounding boxes and confidence labels for cars, motorcycles, buses, and trucks.
+6. Confirm `data/logs/vehicle_detections.csv` is created.
+7. Open the CSV and confirm rows use the documented detection log format.
+8. Re-run with `--confidence 0.45` and compare detection counts.
+9. Re-run with `--skip-frames 2` and confirm fewer frames are processed.
 
-- Load YOLOv8n weights
-- Detect cars, buses, trucks, and motorcycles
-- Draw detection bounding boxes
-- Save detection logs
+## Phase 4 Testing Steps
+
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Add a custom ambulance YOLO model to `data/models/ambulance_detector.pt` or pass `--ambulance-model`.
+3. Run `python ml/detectors/ambulance_detector.py --input data/raw/sample_traffic.mp4 --max-frames 100`.
+4. Confirm the script creates `data/processed/emergency_detection_output.mp4`.
+5. Confirm the script creates `data/logs/emergency_detections.csv`.
+6. Confirm ambulance rows, when present, use the shared CSV log format.
+7. Confirm the frame overlay shows either `Emergency Vehicle: DETECTED` or `Emergency Vehicle: NONE`.
+
+## Phase 5 Preview
+
+Phase 5 will add vehicle counting and traffic density calculation:
+
+- Count detected vehicles per processed frame
+- Aggregate class counts
+- Apply low, medium, and high density rules
