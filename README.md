@@ -6,7 +6,7 @@ This project simulates traffic priority decisions. It does not control real traf
 
 ## Current Status
 
-Phase 1 - Project Setup
+Phase 2 - Computer Vision Foundation
 
 Completed:
 
@@ -16,6 +16,9 @@ Completed:
 - CSV selected for initial historical storage
 - Video upload mode selected as the first input workflow
 - FastAPI deferred
+- OpenCV video loading foundation added
+- Frame extraction and basic frame annotation added
+- Annotated output video saving added
 
 ## Technology Stack
 
@@ -51,6 +54,7 @@ AI-Emergency-Vehicle-Priority-System/
     .gitkeep
   ml/
     .gitkeep
+    cv_pipeline.py
   tests/
     .gitkeep
   .gitignore
@@ -108,7 +112,35 @@ python --version
 pip list
 ```
 
-### 5. Expected first app command after Phase 2
+### 5. Run the Phase 2 OpenCV pipeline
+
+Place a sample traffic video in `data/raw/`, then run:
+
+```powershell
+python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --output data/processed/annotated_output.mp4
+```
+
+To export processed frames as JPG files:
+
+```powershell
+python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --output data/processed/annotated_output.mp4 --frames-dir data/processed/frames
+```
+
+For a quick test on only the first 100 frames:
+
+```powershell
+python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --output data/processed/annotated_output.mp4 --max-frames 100
+```
+
+To display processed frames in an OpenCV window:
+
+```powershell
+python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --display
+```
+
+Press `q` to close the display window early.
+
+### 6. Expected Streamlit command after Phase 7
 
 The Streamlit app will be added in a later phase. Once created, the expected command will be:
 
@@ -130,11 +162,21 @@ streamlit run frontend/app.py
 10. Analytics
 11. Production Readiness
 
-## Phase 2 Preview
+## Phase 2 Testing Steps
 
-Phase 2 will add the OpenCV foundation:
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Add a short video file to `data/raw/`.
+3. Run `python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --output data/processed/annotated_output.mp4 --max-frames 100`.
+4. Confirm the terminal output shows FPS, frame count, dimensions, and processed frame count.
+5. Confirm `data/processed/annotated_output.mp4` is created.
+6. Run again with `--frames-dir data/processed/frames` and confirm JPG frames are created.
+7. Optionally run with `--display` and confirm processed frames appear with frame number, FPS, and timestamp overlays.
 
-- Video upload/loading workflow
-- Frame reading
-- Basic frame preprocessing
-- Early verification with a sample video or uploaded file
+## Phase 3 Preview
+
+Phase 3 will add YOLOv8n vehicle detection:
+
+- Load YOLOv8n weights
+- Detect cars, buses, trucks, and motorcycles
+- Draw detection bounding boxes
+- Save detection logs
