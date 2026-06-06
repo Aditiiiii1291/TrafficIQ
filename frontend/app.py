@@ -1,0 +1,335 @@
+"""Streamlit dashboard for the emergency vehicle priority demo."""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import streamlit as st
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+UPLOAD_DIR = PROJECT_ROOT / "data" / "raw"
+
+
+@dataclass(frozen=True)
+class DashboardImports:
+    """Project modules needed by the dashboard."""
+
+    cv2: Any
+    analyze_density: Any
+    classify_congestion: Any
+    count_vehicle_detections: Any
+    detect_ambulances: Any
+    detect_vehicles: Any
+    draw_congestion_overlay: Any
+    draw_density_overlay: Any
+    draw_priority_overlay: Any
+    generate_priority_action: Any
+    get_video_metadata: Any
+    is_emergency_present: Any
+    iter_frames: Any
+    load_ambulance_model: Any
+    load_yolo_model: Any
+    resolve_ambulance_model_path: Any
+    save_uploaded_video: Any
+    should_process_frame: Any
+
+
+def load_dashboard_imports() -> DashboardImports | None:
+    """Import project modules lazily so missing dependencies can be reported cleanly."""
+
+    try:
+        import cv2
+
+        from ml.analytics.congestion_classifier import classify_congestion, draw_congestion_overlay
+        from ml.analytics.density_analyzer import (
+            analyze_density,
+            count_vehicle_detections,
+            draw_density_overlay,
+        )
+        from ml.analytics.priority_engine import draw_priority_overlay, generate_priority_action
+        from ml.cv_pipeline import get_video_metadata, iter_frames, save_uploaded_video
+        from ml.detectors.ambulance_detector import (
+            detect_ambulances,
+            is_emergency_present,
+            load_ambulance_model,
+            resolve_ambulance_model_path,
+        )
+        from ml.detectors.vehicle_detector import detect_vehicles, load_yolo_model, should_process_frame
+    except ModuleNotFoundError as error:
+        st.error(f"Missing dependency: {error.name}. Install dependencies with pip install -r requirements.txt.")
+        return None
+    except Exception as error:  # pragma: no cover - Streamlit displays this path interactively.
+        st.error(f"Dashboard modules could not be loaded: {error}")
+        return None
+
+    return DashboardImports(
+        cv2=cv2,
+        analyze_density=analyze_density,
+        classify_congestion=classify_congestion,
+        count_vehicle_detections=count_vehicle_detections,
+        detect_ambulances=detect_ambulances,
+        detect_vehicles=detect_vehicles,
+        draw_congestion_overlay=draw_congestion_overlay,
+        draw_density_overlay=draw_density_overlay,
+        draw_priority_overlay=draw_priority_overlay,
+        generate_priority_action=generate_priority_action,
+        get_video_metadata=get_video_metadata,
+        is_emergency_present=is_emergency_present,
+        iter_frames=iter_frames,
+        load_ambulance_model=load_ambulance_model,
+        load_yolo_model=load_yolo_model,
+        resolve_ambulance_model_path=resolve_ambulance_model_path,
+        save_uploaded_video=save_uploaded_video,
+        should_process_frame=should_process_frame,
+    )
+
+
+def render_status_card(label: str, value: str | int | bool) -> None:
+    """Render a compact metric-style status card."""
+
+    st.markdown(
+        f"""
+        <div class="status-card">
+            <div class="status-label">{label}</div>
+            <div class="status-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def configure_page() -> None:
+    """Apply page configuration and lightweight dashboard styling."""
+
+    st.set_page_config(
+        page_title="Emergency Vehicle Priority Dashboard",
+        layout="wide",
+    )
+
+    st.markdown(
+        """
+        <style>
+            .block-container {
+                padding-top: 1.5rem;
+                padding-bottom: 2rem;
+            }
+            .status-card {
+                border: 1px solid #d8dee9;
+                border-radius: 8px;
+                padding: 14px 16px;
+                min-height: 92px;
+                background: #ffffff;
+            }
+            .status-label {
+                color: #4b5563;
+                font-size: 0.82rem;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+            .status-value {
+                color: #111827;
+                font-size: 1.35rem;
+                font-weight: 700;
+                margin-top: 10px;
+                overflow-wrap: anywhere;
+            }
+            .section-note {
+                color: #4b5563;
+                font-size: 0.95rem;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def initial_results() -> dict[str, Any]:
+    """Return default dashboard results before analysis runs."""
+
+    return {
+        "total_vehicles": 0,
+        "car_count": 0,
+        "motorcycle_count": 0,
+        "bus_count": 0,
+        "truck_count": 0,
+        "density": "LOW",
+        "congestion": "LOW_CONGESTION",
+        "emergency_present": False,
+        "recommended_action": "NORMAL_OPERATION",
+        "processed_frames": 0,
+        "latest_frame": None,
+        "ambulance_message": "Ambulance model not available. Using detection infrastructure only.",
+    }
+
+
+def analyze_uploaded_video(
+    imports: DashboardImports,
+    video_path: Path,
+    max_frames: int,
+    skip_frames: int,
+    vehicle_confidence: float,
+    ambulance_confidence: float,
+) -> dict[str, Any]:
+    """Run a bounded dashboard analysis pass over an uploaded video."""
+
+    metadata = imports.get_video_metadata(video_path)
+    vehicle_model = imports.load_yolo_model()
+
+    ambulance_model = None
+    ambulance_message = "Ambulance model not available. Using detection infrastructure only."
+    ambulance_model_path = imports.resolve_ambulance_model_path()
+    if ambulance_model_path.exists():
+        ambulance_model = imports.load_ambulance_model(ambulance_model_path)
+        ambulance_message = f"Ambulance model loaded: {ambulance_model_path}"
+
+    results = initial_results()
+
+    with st.spinner("Analyzing uploaded video..."):
+        for frame_index, frame in imports.iter_frames(video_path):
+            if not imports.should_process_frame(frame_index, skip_frames):
+                continue
+            if results["processed_frames"] >= max_frames:
+                break
+
+            annotated, vehicle_detections = imports.detect_vehicles(
+                frame=frame,
+                model=vehicle_model,
+                confidence_threshold=vehicle_confidence,
+                frame_index=frame_index,
+                fps=metadata.fps,
+                source_video=str(video_path),
+            )
+
+            ambulance_detections = []
+            if ambulance_model is not None:
+                annotated, ambulance_detections = imports.detect_ambulances(
+                    frame=frame,
+                    model=ambulance_model,
+                    confidence_threshold=ambulance_confidence,
+                    base_frame=annotated,
+                )
+
+            vehicle_counts = imports.count_vehicle_detections(vehicle_detections)
+            density_result = imports.analyze_density(vehicle_counts)
+            congestion_result = imports.classify_congestion(density_result)
+            emergency_present = imports.is_emergency_present(ambulance_detections)
+            action_result = imports.generate_priority_action(
+                emergency_present=emergency_present,
+                density_result=density_result,
+                congestion_result=congestion_result,
+            )
+
+            annotated = imports.draw_density_overlay(annotated, density_result)
+            annotated = imports.draw_congestion_overlay(annotated, congestion_result)
+            annotated = imports.draw_priority_overlay(annotated, action_result)
+            latest_frame = imports.cv2.cvtColor(annotated, imports.cv2.COLOR_BGR2RGB)
+
+            results = {
+                **density_result,
+                **congestion_result,
+                **action_result,
+                "processed_frames": results["processed_frames"] + 1,
+                "latest_frame": latest_frame,
+                "ambulance_message": ambulance_message,
+            }
+
+    return results
+
+
+def render_dashboard(results: dict[str, Any]) -> None:
+    """Render dashboard sections and status cards."""
+
+    st.subheader("Traffic Overview")
+    traffic_cols = st.columns(5)
+    with traffic_cols[0]:
+        render_status_card("Vehicle Count", results["total_vehicles"])
+    with traffic_cols[1]:
+        render_status_card("Cars", results["car_count"])
+    with traffic_cols[2]:
+        render_status_card("Motorcycles", results["motorcycle_count"])
+    with traffic_cols[3]:
+        render_status_card("Buses", results["bus_count"])
+    with traffic_cols[4]:
+        render_status_card("Trucks", results["truck_count"])
+
+    st.subheader("Emergency Status")
+    emergency_cols = st.columns(2)
+    with emergency_cols[0]:
+        render_status_card("Emergency Status", "DETECTED" if results["emergency_present"] else "NONE")
+    with emergency_cols[1]:
+        st.info(results["ambulance_message"])
+
+    st.subheader("Congestion Analysis")
+    congestion_cols = st.columns(2)
+    with congestion_cols[0]:
+        render_status_card("Density", results["density"])
+    with congestion_cols[1]:
+        render_status_card("Congestion", results["congestion"])
+
+    st.subheader("Priority Recommendation")
+    render_status_card("Recommended Action", results["recommended_action"])
+
+    if results["latest_frame"] is not None:
+        st.image(results["latest_frame"], caption="Latest analyzed frame", use_container_width=True)
+    else:
+        st.markdown('<p class="section-note">Run analysis to display the latest processed frame.</p>', unsafe_allow_html=True)
+
+
+def main() -> None:
+    """Run the Streamlit dashboard."""
+
+    configure_page()
+
+    st.title("AI Emergency Vehicle Priority Dashboard")
+    st.caption("Resume-focused proof of concept for video-based traffic monitoring and simulated priority recommendations.")
+
+    imports = load_dashboard_imports()
+
+    with st.sidebar:
+        st.header("Analysis Settings")
+        max_frames = st.slider("Frames to analyze", min_value=1, max_value=100, value=10, step=1)
+        skip_frames = st.slider("Skip frames", min_value=0, max_value=10, value=2, step=1)
+        vehicle_confidence = st.slider("Vehicle confidence", min_value=0.10, max_value=0.90, value=0.35, step=0.05)
+        ambulance_confidence = st.slider("Ambulance confidence", min_value=0.10, max_value=0.90, value=0.35, step=0.05)
+
+    uploaded_file = st.file_uploader("Upload a traffic video", type=["mp4", "avi", "mov"])
+    results = initial_results()
+
+    if uploaded_file is not None:
+        st.video(uploaded_file.getvalue())
+
+        if imports is not None:
+            uploaded_file.seek(0)
+            video_path = imports.save_uploaded_video(uploaded_file, UPLOAD_DIR)
+            st.caption(f"Uploaded file saved for analysis: {video_path.name}")
+
+            if st.button("Analyze Video", type="primary"):
+                try:
+                    results = analyze_uploaded_video(
+                        imports=imports,
+                        video_path=video_path,
+                        max_frames=max_frames,
+                        skip_frames=skip_frames,
+                        vehicle_confidence=vehicle_confidence,
+                        ambulance_confidence=ambulance_confidence,
+                    )
+                    st.success(f"Analyzed {results['processed_frames']} frame(s).")
+                except FileNotFoundError as error:
+                    st.warning(str(error))
+                except Exception as error:  # pragma: no cover - displayed interactively.
+                    st.error(f"Analysis failed: {error}")
+    else:
+        st.info("Upload an mp4, avi, or mov traffic video to begin.")
+
+    render_dashboard(results)
+
+
+if __name__ == "__main__":
+    main()

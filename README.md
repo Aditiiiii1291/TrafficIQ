@@ -6,7 +6,7 @@ This project simulates traffic priority decisions. It does not control real traf
 
 ## Current Status
 
-Phase 7 - Emergency Priority Engine
+Phase 8 - Streamlit Dashboard
 
 Completed:
 
@@ -34,6 +34,9 @@ Completed:
 - Emergency priority engine module added
 - Configurable recommendation rules added
 - Priority action CSV logging support added
+- Streamlit dashboard added
+- Video upload workflow added
+- Dashboard status cards added for traffic, emergency, congestion, and priority outputs
 
 ## Technology Stack
 
@@ -67,6 +70,7 @@ AI-Emergency-Vehicle-Priority-System/
     .gitkeep
   frontend/
     .gitkeep
+    app.py
   ml/
     __init__.py
     .gitkeep
@@ -165,9 +169,9 @@ python ml/cv_pipeline.py --input data/raw/sample_traffic.mp4 --display
 
 Press `q` to close the display window early.
 
-### 6. Expected Streamlit command after Phase 7
+### 6. Launch the Streamlit dashboard
 
-The Streamlit app will be added in a later phase. Once created, the expected command will be:
+After installing dependencies, run:
 
 ```powershell
 streamlit run frontend/app.py
@@ -575,6 +579,55 @@ To simulate emergency-present recommendations for every row:
 python ml/analytics/priority_engine.py --congestion-log data/logs/congestion_analysis.csv --output-log data/logs/priority_actions.csv --emergency-present
 ```
 
+## Streamlit Dashboard
+
+Phase 8 adds the interactive dashboard in `frontend/app.py`.
+
+The dashboard supports uploaded traffic videos in these formats:
+
+```text
+mp4
+avi
+mov
+```
+
+Dashboard sections:
+
+- Traffic Overview
+- Emergency Status
+- Congestion Analysis
+- Priority Recommendation
+
+Status cards display:
+
+- Vehicle Count
+- Density
+- Congestion
+- Emergency Status
+- Recommended Action
+
+The dashboard connects to existing project modules:
+
+- Vehicle detector
+- Ambulance detector
+- Density analyzer
+- Congestion classifier
+- Priority engine
+
+The ambulance detector is handled gracefully when a custom ambulance model is missing:
+
+```text
+Ambulance model not available. Using detection infrastructure only.
+```
+
+Launch command:
+
+```powershell
+streamlit run frontend/app.py
+```
+
+The dashboard is still a simulated proof of concept. It does not implement machine learning prediction, FastAPI, hardware integration, or real traffic signal control.
+
 ## Development Phases
 
 1. Project Setup
@@ -583,9 +636,9 @@ python ml/analytics/priority_engine.py --congestion-log data/logs/congestion_ana
 4. Ambulance Detection
 5. Vehicle Counting
 6. Congestion Classification
-7. Dashboard
-8. Machine Learning
-9. Priority Engine
+7. Emergency Priority Engine
+8. Dashboard
+9. Machine Learning
 10. Analytics
 11. Production Readiness
 
@@ -649,10 +702,20 @@ python ml/analytics/priority_engine.py --congestion-log data/logs/congestion_ana
 6. Import `generate_priority_action` in Python and verify it returns the documented dictionary format.
 7. Re-run with `--emergency-present` and confirm recommendations become `EMERGENCY_PRIORITY`.
 
-## Phase 8 Preview
+## Phase 8 Testing Steps
 
-Phase 8 will add the Streamlit dashboard:
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Run `streamlit run frontend/app.py`.
+3. Upload an `mp4`, `avi`, or `mov` traffic video.
+4. Confirm the dashboard displays the uploaded video.
+5. Click `Analyze Video`.
+6. Confirm status cards show vehicle count, density, congestion, emergency status, and recommended action.
+7. Confirm the dashboard shows the missing ambulance model message when no custom ambulance model is available.
 
-- Video upload workflow
-- Display processed frames and metrics
-- Present detection, density, congestion, and priority action outputs
+## Phase 9 Preview
+
+Phase 9 will add machine learning prediction:
+
+- Prepare training data from historical CSV logs
+- Train a congestion prediction model
+- Report evaluation metrics without overstating accuracy
