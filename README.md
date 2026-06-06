@@ -6,7 +6,7 @@ This project simulates traffic priority decisions. It does not control real traf
 
 ## Current Status
 
-Phase 5 - Traffic Density Analysis
+Phase 6 - Congestion Classification
 
 Completed:
 
@@ -28,6 +28,9 @@ Completed:
 - Traffic density analysis module added
 - Configurable LOW, MEDIUM, and HIGH density thresholds added
 - Density CSV logging support added
+- Congestion classification module added
+- Configurable density-to-congestion rules added
+- Congestion CSV logging support added
 
 ## Technology Stack
 
@@ -66,6 +69,7 @@ AI-Emergency-Vehicle-Priority-System/
     .gitkeep
     analytics/
       __init__.py
+      congestion_classifier.py
       density_analyzer.py
     cv_pipeline.py
     detectors/
@@ -398,6 +402,81 @@ Analyze an existing Phase 3 detection log:
 python ml/analytics/density_analyzer.py --detections-log data/logs/vehicle_detections.csv --output-log data/logs/density_analysis.csv
 ```
 
+## Congestion Classification
+
+Phase 6 adds congestion classification in `ml/analytics/congestion_classifier.py`.
+
+The classifier consumes Phase 5 density results and maps them to congestion levels:
+
+```text
+LOW -> LOW_CONGESTION
+MEDIUM -> MEDIUM_CONGESTION
+HIGH -> HIGH_CONGESTION
+```
+
+It is a rule-based classification layer only. It does not implement machine learning prediction, a Streamlit dashboard, an emergency priority engine, or traffic signal control.
+
+### Congestion Rules
+
+Default configurable mapping:
+
+```python
+CONGESTION_RULES = {
+    "LOW": "LOW_CONGESTION",
+    "MEDIUM": "MEDIUM_CONGESTION",
+    "HIGH": "HIGH_CONGESTION",
+}
+```
+
+### Reusable Congestion API
+
+```python
+congestion_result = classify_congestion(density_result)
+```
+
+Example input:
+
+```python
+density_result = {
+    "total_vehicles": 18,
+    "density": "MEDIUM",
+}
+```
+
+Example output:
+
+```python
+{
+    "total_vehicles": 18,
+    "density": "MEDIUM",
+    "congestion": "MEDIUM_CONGESTION",
+}
+```
+
+### Congestion Overlay
+
+Use `draw_congestion_overlay(frame, congestion_result)` to add:
+
+```text
+Congestion: LOW_CONGESTION
+Congestion: MEDIUM_CONGESTION
+Congestion: HIGH_CONGESTION
+```
+
+### Congestion Logging
+
+Congestion logs are written with these columns:
+
+```text
+timestamp,total_vehicles,density,congestion
+```
+
+Analyze an existing Phase 5 density log:
+
+```powershell
+python ml/analytics/congestion_classifier.py --density-log data/logs/density_analysis.csv --output-log data/logs/congestion_analysis.csv
+```
+
 ## Development Phases
 
 1. Project Setup
@@ -453,10 +532,19 @@ python ml/analytics/density_analyzer.py --detections-log data/logs/vehicle_detec
 5. Confirm each row includes total count, per-class counts, and `LOW`, `MEDIUM`, or `HIGH`.
 6. Import `analyze_density` in Python and verify it returns the documented dictionary format.
 
-## Phase 6 Preview
+## Phase 6 Testing Steps
 
-Phase 6 will add congestion classification history:
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Generate a Phase 5 density log at `data/logs/density_analysis.csv`.
+3. Run `python ml/analytics/congestion_classifier.py --density-log data/logs/density_analysis.csv --output-log data/logs/congestion_analysis.csv`.
+4. Confirm `data/logs/congestion_analysis.csv` is created.
+5. Confirm each row includes timestamp, total vehicles, density, and congestion.
+6. Import `classify_congestion` in Python and verify it returns the documented dictionary format.
 
-- Store density history over time
-- Prepare low, medium, and high congestion records
-- Keep prediction logic for a later ML phase
+## Phase 7 Preview
+
+Phase 7 will add the Streamlit dashboard:
+
+- Video upload workflow
+- Display processed frames and metrics
+- Present detection, density, and congestion outputs
