@@ -9,7 +9,7 @@
 ![Status](https://img.shields.io/badge/status-portfolio%20ready-blueviolet)
 ![CI](https://img.shields.io/badge/CI%2FCD-planned-lightgrey)
 
-A resume-ready AI platform that analyzes traffic videos, detects vehicles and emergency vehicles, estimates traffic density, classifies congestion, predicts congestion levels, and recommends simulated emergency priority actions through an interactive Streamlit dashboard.
+A AI platform that analyzes traffic videos, detects vehicles and emergency vehicles, estimates traffic density, classifies congestion, predicts congestion levels, and recommends simulated emergency priority actions through an interactive Streamlit dashboard.
 
 This project is a software simulation and analytics platform. It does not control real traffic lights, emergency infrastructure, IoT hardware, GPS systems, or siren/audio devices.
 
@@ -23,13 +23,6 @@ pip install -r requirements.txt
 streamlit run frontend/app.py
 ```
 
-Optional CLI training workflow:
-
-```powershell
-python ml/prediction/dataset_builder.py --logs data/logs --output data/datasets/congestion_training_dataset.csv
-python ml/prediction/congestion_predictor.py --train data/datasets/congestion_training_dataset.csv
-```
-
 ## Why This Project
 
 Emergency vehicles often lose critical time when traffic is dense, intersections are unmanaged, or operators lack timely visibility into congestion patterns. Even a short delay can matter when ambulances, fire vehicles, or emergency response units need a clear route.
@@ -38,9 +31,6 @@ This platform demonstrates how computer vision and traffic analytics can support
 
 The project is intentionally scoped for portfolio and learning use. It focuses on the AI, analytics, and dashboard layers that would support a future intelligent traffic system, without claiming real-world signal control or safety-critical deployment readiness.
 
-## Resume-Ready Project Description
-
-Built an end-to-end AI traffic intelligence platform using YOLOv8, OpenCV, Scikit-Learn, and Streamlit. The system processes uploaded traffic videos, detects vehicle classes, identifies emergency vehicle presence through a modular detector interface, analyzes density and congestion, trains a congestion prediction model from historical logs, and displays operational insights in a dashboard. The repository includes modular analytics components, CSV-based historical data workflows, production-oriented logging, and 56 automated tests.
 
 ## Key Features
 
@@ -66,7 +56,7 @@ Built an end-to-end AI traffic intelligence platform using YOLOv8, OpenCV, Sciki
 
 ## Engineering Achievements
 
-- 56 automated tests passing
+- 86 automated tests passing
 - Modular architecture across detection, analytics, prediction, and frontend layers
 - End-to-end analytics pipeline from video input to dashboard insight
 - Congestion prediction pipeline with dataset generation and saved model support
@@ -148,8 +138,6 @@ Planned screenshot placeholders:
 ![Prediction panel](docs/screenshots/prediction-panel.png)
 
 ![Historical analytics](docs/screenshots/historical-analytics.png)
-
-No fake screenshots are included. These paths are reserved for real screenshots captured from the running dashboard.
 
 Dashboard sections:
 
@@ -353,8 +341,6 @@ data/logs/priority_actions.csv
 data/datasets/congestion_training_dataset.csv
 data/models/congestion_predictor.pkl
 ```
-
-Generated artifacts are intentionally ignored by Git. The repository tracks `.gitkeep` placeholders so the expected folder layout remains visible.
 
 ## ML Model Explanation
 
