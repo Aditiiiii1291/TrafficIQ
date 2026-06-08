@@ -31,6 +31,7 @@ class DashboardImports:
     draw_congestion_overlay: Any
     draw_density_overlay: Any
     draw_priority_overlay: Any
+    generate_signal_timing_recommendation: Any
     generate_priority_action: Any
     generate_event_statistics: Any
     generate_summary: Any
@@ -64,6 +65,7 @@ def load_dashboard_imports() -> DashboardImports | None:
             draw_density_overlay,
         )
         from ml.analytics.priority_engine import draw_priority_overlay, generate_priority_action
+        from ml.analytics.signal_timing_engine import generate_signal_timing_recommendation
         from ml.analytics.history_analytics import (
             CONGESTION_LEVELS,
             RECOMMENDATION_ACTIONS,
@@ -102,6 +104,7 @@ def load_dashboard_imports() -> DashboardImports | None:
         draw_congestion_overlay=draw_congestion_overlay,
         draw_density_overlay=draw_density_overlay,
         draw_priority_overlay=draw_priority_overlay,
+        generate_signal_timing_recommendation=generate_signal_timing_recommendation,
         generate_priority_action=generate_priority_action,
         generate_event_statistics=generate_event_statistics,
         generate_summary=generate_summary,
@@ -196,6 +199,11 @@ def initial_results() -> dict[str, Any]:
         "predicted_congestion": "Model not trained",
         "emergency_present": False,
         "recommended_action": "NORMAL_OPERATION",
+        "recommended_green_seconds": 35,
+        "signal_priority_action": "NORMAL_OPERATION",
+        "signal_severity": "NORMAL",
+        "signal_reason": "Low congestion detected",
+        "signal_confidence_note": "Rule-based recommendation",
         "processed_frames": 0,
         "latest_frame": None,
         "ambulance_message": "Ambulance model not available. Using detection infrastructure only.",
@@ -262,6 +270,11 @@ def analyze_uploaded_video(
                 density_result=density_result,
                 congestion_result=congestion_result,
             )
+            signal_timing_result = imports.generate_signal_timing_recommendation(
+                density_result=density_result,
+                congestion_result=congestion_result,
+                priority_result=action_result,
+            )
             predicted_congestion = "Model not trained"
             if prediction_model is not None:
                 predicted_congestion = imports.predict_congestion(
@@ -281,6 +294,11 @@ def analyze_uploaded_video(
                 **density_result,
                 **congestion_result,
                 **action_result,
+                "recommended_green_seconds": signal_timing_result["recommended_green_seconds"],
+                "signal_priority_action": signal_timing_result["priority_action"],
+                "signal_severity": signal_timing_result["severity"],
+                "signal_reason": signal_timing_result["reason"],
+                "signal_confidence_note": signal_timing_result["confidence_note"],
                 "predicted_congestion": predicted_congestion,
                 "processed_frames": results["processed_frames"] + 1,
                 "latest_frame": latest_frame,
@@ -323,6 +341,20 @@ def render_dashboard(results: dict[str, Any]) -> None:
 
     st.subheader("Priority Recommendation")
     render_status_card("Recommended Action", results["recommended_action"])
+
+    st.subheader("Smart Signal Timing")
+    signal_cols = st.columns(3)
+    with signal_cols[0]:
+        render_status_card("Recommended Green Time", f"{results['recommended_green_seconds']} sec")
+    with signal_cols[1]:
+        render_status_card("Priority Action", results["signal_priority_action"])
+    with signal_cols[2]:
+        render_status_card("Severity", results["signal_severity"])
+    signal_cols = st.columns(2)
+    with signal_cols[0]:
+        render_status_card("Reason", results["signal_reason"])
+    with signal_cols[1]:
+        render_status_card("Confidence Note", results["signal_confidence_note"])
 
     if results["latest_frame"] is not None:
         st.image(results["latest_frame"], caption="Latest analyzed frame", use_container_width=True)
