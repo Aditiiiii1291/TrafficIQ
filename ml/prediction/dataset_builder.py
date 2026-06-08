@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 
 DATASET_COLUMNS = [
@@ -47,22 +50,32 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
     """Read a CSV file if it exists."""
 
     if not path.exists():
+        logger.warning(f"CSV log file does not exist, skipping read: {path}")
         return []
-    with path.open("r", newline="", encoding="utf-8") as csv_file:
-        return list(csv.DictReader(csv_file))
+    logger.info(f"Reading CSV log from: {path}")
+    try:
+        with path.open("r", newline="", encoding="utf-8") as csv_file:
+            return list(csv.DictReader(csv_file))
+    except Exception as error:
+        logger.error(f"Failed to read CSV log from {path}: {error}")
+        return []
 
 
 def _write_dataset(output_path: str | Path, records: Iterable[TrainingDatasetRecord]) -> None:
     """Write training dataset rows to CSV."""
 
     path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=DATASET_COLUMNS)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
+    logger.info(f"Writing training dataset to: {path}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=DATASET_COLUMNS)
+            writer.writeheader()
+            for record in records:
+                writer.writerow(asdict(record))
+    except Exception as error:
+        logger.error(f"Failed to write training dataset to {path}: {error}")
+        raise
 
 
 def _to_bool(value: str | bool | int | None) -> bool:
@@ -275,6 +288,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run dataset generation from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     records = build_training_dataset(
         logs_dir=args.logs,

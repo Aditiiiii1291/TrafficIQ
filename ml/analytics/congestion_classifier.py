@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 
 CONGESTION_RULES = {
@@ -116,20 +119,33 @@ def write_congestion_log(log_path: str | Path, records: Iterable[CongestionLogRe
     """Write congestion analysis records to CSV."""
 
     path = Path(log_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=CONGESTION_LOG_COLUMNS)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
+    logger.info(f"Writing congestion analysis log to: {path}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=CONGESTION_LOG_COLUMNS)
+            writer.writeheader()
+            for record in records:
+                writer.writerow(asdict(record))
+    except Exception as error:
+        logger.error(f"Failed to write congestion analysis log to {path}: {error}")
+        raise
 
 
 def read_density_log(log_path: str | Path) -> list[dict[str, str]]:
     """Read Phase 5 density CSV records."""
 
-    with Path(log_path).open("r", newline="", encoding="utf-8") as csv_file:
-        return list(csv.DictReader(csv_file))
+    path = Path(log_path)
+    logger.info(f"Reading density log from: {path}")
+    if not path.exists():
+        logger.error(f"Density log file not found: {path}")
+        raise FileNotFoundError(f"Density log file not found: {path}")
+    try:
+        with Path(log_path).open("r", newline="", encoding="utf-8") as csv_file:
+            return list(csv.DictReader(csv_file))
+    except Exception as error:
+        logger.error(f"Failed to read density log from {path}: {error}")
+        raise
 
 
 def classify_congestion_from_density_log(
@@ -138,25 +154,41 @@ def classify_congestion_from_density_log(
 ) -> list[CongestionLogRecord]:
     """Create congestion records from a Phase 5 density analysis CSV."""
 
-    density_rows = read_density_log(density_log_path)
+    logger.info(f"Starting congestion classification from density log: {density_log_path}")
+    try:
+        density_rows = read_density_log(density_log_path)
+    except Exception as error:
+        logger.error(f"Aborting congestion classification due to read failure: {error}")
+        raise
+
     congestion_records: list[CongestionLogRecord] = []
 
     for row in density_rows:
-        congestion_result = classify_congestion(
-            {
-                "total_vehicles": row.get("total_vehicles", 0),
-                "density": row.get("density", ""),
-            }
-        )
-        timestamp = row.get("timestamp_seconds") or row.get("timestamp") or None
-        congestion_records.append(
-            build_congestion_log_record(
-                congestion_result=congestion_result,
-                timestamp=str(timestamp) if timestamp is not None else None,
+        try:
+            congestion_result = classify_congestion(
+                {
+                    "total_vehicles": row.get("total_vehicles", 0),
+                    "density": row.get("density", ""),
+                }
             )
-        )
+            timestamp = row.get("timestamp_seconds") or row.get("timestamp") or None
+            congestion_records.append(
+                build_congestion_log_record(
+                    congestion_result=congestion_result,
+                    timestamp=str(timestamp) if timestamp is not None else None,
+                )
+            )
+        except Exception as error:
+            logger.warning(f"Skipping density row due to classification failure: {row}, error: {error}")
+            continue
 
-    write_congestion_log(output_log_path, congestion_records)
+    try:
+        write_congestion_log(output_log_path, congestion_records)
+    except Exception as error:
+        logger.error(f"Failed to save congestion records: {error}")
+        raise
+
+    logger.info(f"Successfully processed {len(congestion_records)} records for congestion classification.")
     return congestion_records
 
 
@@ -180,6 +212,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run congestion classification from a density CSV log."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     records = classify_congestion_from_density_log(
         density_log_path=args.density_log,

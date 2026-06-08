@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 
 LOW_VEHICLE_THRESHOLD = 10
@@ -223,20 +226,33 @@ def write_density_log(log_path: str | Path, records: Iterable[DensityLogRecord])
     """Write density analysis records to CSV."""
 
     path = Path(log_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=DENSITY_LOG_COLUMNS)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
+    logger.info(f"Writing density analysis log to: {path}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=DENSITY_LOG_COLUMNS)
+            writer.writeheader()
+            for record in records:
+                writer.writerow(asdict(record))
+    except Exception as error:
+        logger.error(f"Failed to write density analysis log to {path}: {error}")
+        raise
 
 
 def read_detection_log(log_path: str | Path) -> list[dict[str, str]]:
     """Read Phase 3-compatible detection CSV records."""
 
-    with Path(log_path).open("r", newline="", encoding="utf-8") as csv_file:
-        return list(csv.DictReader(csv_file))
+    path = Path(log_path)
+    logger.info(f"Reading detection log from: {path}")
+    if not path.exists():
+        logger.error(f"Detection log file not found: {path}")
+        raise FileNotFoundError(f"Detection log file not found: {path}")
+    try:
+        with path.open("r", newline="", encoding="utf-8") as csv_file:
+            return list(csv.DictReader(csv_file))
+    except Exception as error:
+        logger.error(f"Failed to read detection log from {path}: {error}")
+        raise
 
 
 def analyze_density_from_detection_log(
@@ -245,14 +261,24 @@ def analyze_density_from_detection_log(
 ) -> list[DensityLogRecord]:
     """Create per-frame density records from a Phase 3 detection log CSV."""
 
-    detection_rows = read_detection_log(detection_log_path)
+    logger.info(f"Starting density analysis from detection log: {detection_log_path}")
+    try:
+        detection_rows = read_detection_log(detection_log_path)
+    except Exception as error:
+        logger.error(f"Aborting density analysis due to read failure: {error}")
+        raise
+
     grouped_rows: dict[tuple[str, int, float], list[dict[str, str]]] = {}
 
     for row in detection_rows:
-        source_video = row.get("source_video", "")
-        frame_index = int(row.get("frame_index", 0))
-        timestamp_seconds = float(row.get("timestamp_seconds", 0.0))
-        grouped_rows.setdefault((source_video, frame_index, timestamp_seconds), []).append(row)
+        try:
+            source_video = row.get("source_video", "")
+            frame_index = int(row.get("frame_index", 0))
+            timestamp_seconds = float(row.get("timestamp_seconds", 0.0))
+            grouped_rows.setdefault((source_video, frame_index, timestamp_seconds), []).append(row)
+        except (ValueError, TypeError) as error:
+            logger.warning(f"Skipping malformed row {row}: {error}")
+            continue
 
     density_records: list[DensityLogRecord] = []
     for (source_video, frame_index, timestamp_seconds), detections in sorted(grouped_rows.items()):
@@ -267,7 +293,13 @@ def analyze_density_from_detection_log(
             )
         )
 
-    write_density_log(density_log_path, density_records)
+    try:
+        write_density_log(density_log_path, density_records)
+    except Exception as error:
+        logger.error(f"Failed to save density records: {error}")
+        raise
+
+    logger.info(f"Successfully processed {len(density_records)} frames for density analysis.")
     return density_records
 
 
@@ -291,6 +323,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run density analysis from a detection CSV log."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     records = analyze_density_from_detection_log(
         detection_log_path=args.detections_log,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -94,7 +97,13 @@ def train_model(
 ) -> dict[str, Any]:
     """Train and persist the congestion prediction model."""
 
-    dataframe = _load_training_dataframe(dataset_path)
+    logger.info(f"Starting model training with dataset: {dataset_path}")
+    try:
+        dataframe = _load_training_dataframe(dataset_path)
+    except Exception as error:
+        logger.error(f"Failed to load training dataframe: {error}")
+        raise
+
     x = dataframe[FEATURE_COLUMNS]
     y = dataframe[TARGET_COLUMN]
 
@@ -108,15 +117,28 @@ def train_model(
             stratify=stratify,
         )
     else:
+        logger.warning(f"Training dataset too small ({len(dataframe)} rows) or has single class. Skipping split.")
         x_train, x_test, y_train, y_test = x, x, y, y
 
+    logger.info("Building Random Forest Classifier pipeline...")
     model = _build_pipeline()
-    model.fit(x_train, y_train)
+    try:
+        model.fit(x_train, y_train)
+    except Exception as error:
+        logger.error(f"Model training fit operation failed: {error}")
+        raise
+
     metrics = _evaluate_model(model, x_test, y_test)
+    logger.info(f"Model trained successfully. Evaluation metrics: {metrics}")
 
     output = Path(model_output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, output)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(model, output)
+        logger.info(f"Trained model saved to: {output}")
+    except Exception as error:
+        logger.error(f"Failed to save trained model to {output}: {error}")
+        raise
 
     return {
         "model_path": str(output),
@@ -130,7 +152,16 @@ def train_model(
 def load_model(model_path: str | Path = MODEL_OUTPUT_PATH) -> Pipeline:
     """Load a persisted congestion prediction model."""
 
-    return joblib.load(model_path)
+    path = Path(model_path)
+    logger.info(f"Loading congestion prediction model from: {path}")
+    if not path.exists():
+        logger.error(f"Model file not found: {path}")
+        raise FileNotFoundError(f"Model file not found: {path}")
+    try:
+        return joblib.load(path)
+    except Exception as error:
+        logger.error(f"Failed to load model from {path}: {error}")
+        raise RuntimeError(f"Failed to load model from {path}: {error}") from error
 
 
 def _feature_frame(features: dict[str, Any]) -> pd.DataFrame:
@@ -145,8 +176,12 @@ def _feature_frame(features: dict[str, Any]) -> pd.DataFrame:
 def predict_congestion(model: Pipeline, features: dict[str, Any]) -> str:
     """Predict congestion from one feature dictionary."""
 
-    prediction = model.predict(_feature_frame(features))[0]
-    return str(prediction)
+    try:
+        prediction = model.predict(_feature_frame(features))[0]
+        return str(prediction)
+    except Exception as error:
+        logger.error(f"Prediction failed: {error}")
+        raise
 
 
 def predict_from_model_file(
@@ -155,8 +190,12 @@ def predict_from_model_file(
 ) -> str:
     """Load a saved model and run one prediction."""
 
-    model = load_model(model_path)
-    return predict_congestion(model, features or {})
+    try:
+        model = load_model(model_path)
+        return predict_congestion(model, features or {})
+    except Exception as error:
+        logger.error(f"Prediction from model file failed: {error}")
+        raise
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -180,6 +219,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run training or prediction from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
 
     if args.train:

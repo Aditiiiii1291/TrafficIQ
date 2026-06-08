@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -55,6 +56,7 @@ LOG_COLUMNS = [
 ]
 
 _MODEL_CACHE: dict[str, YOLO] = {}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -104,7 +106,12 @@ def load_yolo_model(model_path: str | Path = "yolov8n.pt") -> YOLO:
 
     key = str(model_path)
     if key not in _MODEL_CACHE:
-        _MODEL_CACHE[key] = YOLO(key)
+        logger.info(f"Loading YOLO vehicle model from: {key}")
+        try:
+            _MODEL_CACHE[key] = YOLO(key)
+        except Exception as error:
+            logger.error(f"Failed to load YOLO model from {key}: {error}")
+            raise RuntimeError(f"Failed to load YOLO model from {key}: {error}") from error
     return _MODEL_CACHE[key]
 
 
@@ -425,6 +432,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run YOLOv8n vehicle detection from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     summary = process_video_with_vehicle_detection(
         input_path=args.input,

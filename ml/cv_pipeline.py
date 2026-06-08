@@ -8,6 +8,7 @@ preview display, and annotated output video writing.
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -16,6 +17,8 @@ import cv2
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -50,11 +53,14 @@ def validate_video_path(video_path: str | Path) -> Path:
 
     path = Path(video_path)
     if not path.exists():
+        logger.error(f"Video file not found: {path}")
         raise FileNotFoundError(f"Video file not found: {path}")
     if not path.is_file():
+        logger.error(f"Video path is not a file: {path}")
         raise ValueError(f"Video path is not a file: {path}")
     if path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:
         supported = ", ".join(sorted(SUPPORTED_VIDEO_EXTENSIONS))
+        logger.error(f"Unsupported video format '{path.suffix}'. Use one of: {supported}")
         raise ValueError(f"Unsupported video format '{path.suffix}'. Use one of: {supported}")
     return path
 
@@ -68,8 +74,13 @@ def save_uploaded_video(uploaded_file: BinaryIO, destination_dir: str | Path) ->
     filename = Path(getattr(uploaded_file, "name", "uploaded_video.mp4")).name
     output_path = destination / filename
 
-    with output_path.open("wb") as file:
-        file.write(uploaded_file.read())
+    logger.info(f"Saving uploaded video stream to: {output_path}")
+    try:
+        with output_path.open("wb") as file:
+            file.write(uploaded_file.read())
+    except Exception as error:
+        logger.error(f"Failed to write uploaded video file to {output_path}: {error}")
+        raise
 
     return output_path
 
@@ -78,8 +89,10 @@ def open_video_capture(video_path: str | Path) -> cv2.VideoCapture:
     """Open a validated video file with OpenCV."""
 
     path = validate_video_path(video_path)
+    logger.info(f"Opening video capture for: {path}")
     capture = cv2.VideoCapture(str(path))
     if not capture.isOpened():
+        logger.error(f"OpenCV could not open video: {path}")
         raise RuntimeError(f"OpenCV could not open video: {path}")
     return capture
 
@@ -97,7 +110,7 @@ def get_video_metadata(video_path: str | Path) -> VideoMetadata:
         height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         duration_seconds = frame_count / fps if fps > 0 else 0.0
 
-        return VideoMetadata(
+        metadata = VideoMetadata(
             source_path=str(path),
             fps=fps,
             frame_count=frame_count,
@@ -105,6 +118,11 @@ def get_video_metadata(video_path: str | Path) -> VideoMetadata:
             height=height,
             duration_seconds=duration_seconds,
         )
+        logger.info(f"Video metadata read successfully: {fps} FPS, {frame_count} frames, {width}x{height}")
+        return metadata
+    except Exception as error:
+        logger.error(f"Failed to retrieve video metadata for {path}: {error}")
+        raise
     finally:
         capture.release()
 
@@ -125,6 +143,7 @@ def iter_frames(video_path: str | Path) -> Iterator[tuple[int, object]]:
             frame_index += 1
     finally:
         capture.release()
+        logger.info(f"Released video capture for: {video_path}")
 
 
 def annotate_frame(frame: object, frame_index: int, fps: float, total_frames: int) -> object:
@@ -190,6 +209,7 @@ def process_video(
     if max_frames is not None and max_frames < 1:
         raise ValueError("max_frames must be None or 1 or greater")
 
+    logger.info(f"Starting video processing: {input_path} -> {output_path}")
     metadata = get_video_metadata(input_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -206,6 +226,7 @@ def process_video(
         (metadata.width, metadata.height),
     )
     if not writer.isOpened():
+        logger.error(f"OpenCV could not create output video: {output}")
         raise RuntimeError(f"OpenCV could not create output video: {output}")
 
     processed_frames = 0
@@ -287,6 +308,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run the pipeline from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     summary = process_video(
         input_path=args.input,

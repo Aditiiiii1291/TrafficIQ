@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 
 NORMAL_OPERATION = "NORMAL_OPERATION"
@@ -149,20 +152,33 @@ def write_priority_log(log_path: str | Path, records: Iterable[PriorityLogRecord
     """Write priority recommendation records to CSV."""
 
     path = Path(log_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=PRIORITY_LOG_COLUMNS)
-        writer.writeheader()
-        for record in records:
-            writer.writerow(asdict(record))
+    logger.info(f"Writing priority actions log to: {path}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=PRIORITY_LOG_COLUMNS)
+            writer.writeheader()
+            for record in records:
+                writer.writerow(asdict(record))
+    except Exception as error:
+        logger.error(f"Failed to write priority actions log to {path}: {error}")
+        raise
 
 
 def read_congestion_log(log_path: str | Path) -> list[dict[str, str]]:
     """Read Phase 6 congestion CSV records."""
 
-    with Path(log_path).open("r", newline="", encoding="utf-8") as csv_file:
-        return list(csv.DictReader(csv_file))
+    path = Path(log_path)
+    logger.info(f"Reading congestion log from: {path}")
+    if not path.exists():
+        logger.error(f"Congestion log file not found: {path}")
+        raise FileNotFoundError(f"Congestion log file not found: {path}")
+    try:
+        with Path(log_path).open("r", newline="", encoding="utf-8") as csv_file:
+            return list(csv.DictReader(csv_file))
+    except Exception as error:
+        logger.error(f"Failed to read congestion log from {path}: {error}")
+        raise
 
 
 def generate_actions_from_congestion_log(
@@ -172,28 +188,44 @@ def generate_actions_from_congestion_log(
 ) -> list[PriorityLogRecord]:
     """Create priority recommendation records from a Phase 6 congestion log."""
 
-    congestion_rows = read_congestion_log(congestion_log_path)
+    logger.info(f"Starting priority action generation from congestion log: {congestion_log_path}")
+    try:
+        congestion_rows = read_congestion_log(congestion_log_path)
+    except Exception as error:
+        logger.error(f"Aborting priority actions generation due to read failure: {error}")
+        raise
+
     priority_records: list[PriorityLogRecord] = []
 
     for row in congestion_rows:
-        density_result = {"density": row.get("density", "")}
-        congestion_result = {
-            "density": row.get("density", ""),
-            "congestion": row.get("congestion", ""),
-        }
-        action_result = generate_priority_action(
-            emergency_present=emergency_present,
-            density_result=density_result,
-            congestion_result=congestion_result,
-        )
-        priority_records.append(
-            build_priority_log_record(
-                action_result=action_result,
-                timestamp=row.get("timestamp") or None,
+        try:
+            density_result = {"density": row.get("density", "")}
+            congestion_result = {
+                "density": row.get("density", ""),
+                "congestion": row.get("congestion", ""),
+            }
+            action_result = generate_priority_action(
+                emergency_present=emergency_present,
+                density_result=density_result,
+                congestion_result=congestion_result,
             )
-        )
+            priority_records.append(
+                build_priority_log_record(
+                    action_result=action_result,
+                    timestamp=row.get("timestamp") or None,
+                )
+            )
+        except Exception as error:
+            logger.warning(f"Skipping congestion row due to action generation failure: {row}, error: {error}")
+            continue
 
-    write_priority_log(output_log_path, priority_records)
+    try:
+        write_priority_log(output_log_path, priority_records)
+    except Exception as error:
+        logger.error(f"Failed to save priority actions: {error}")
+        raise
+
+    logger.info(f"Successfully processed {len(priority_records)} records for priority recommendations.")
     return priority_records
 
 
@@ -222,6 +254,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run priority recommendation generation from a congestion CSV log."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     records = generate_actions_from_congestion_log(
         congestion_log_path=args.congestion_log,

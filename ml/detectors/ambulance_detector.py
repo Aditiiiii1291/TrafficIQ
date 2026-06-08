@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import os
 import sys
 from dataclasses import asdict, dataclass
@@ -38,6 +39,7 @@ AMBULANCE_COLOR = (40, 40, 255)
 AMBULANCE_MODEL_ENV_VAR = "AMBULANCE_MODEL_PATH"
 
 _AMBULANCE_MODEL_CACHE: dict[str, YOLO] = {}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,12 @@ def load_ambulance_model(model_path: str | Path | None = None) -> YOLO:
     resolved_path = resolve_ambulance_model_path(model_path)
     key = str(resolved_path)
     if key not in _AMBULANCE_MODEL_CACHE:
-        _AMBULANCE_MODEL_CACHE[key] = YOLO(key)
+        logger.info(f"Loading YOLO ambulance model from: {key}")
+        try:
+            _AMBULANCE_MODEL_CACHE[key] = YOLO(key)
+        except Exception as error:
+            logger.error(f"Failed to load ambulance model from {key}: {error}")
+            raise RuntimeError(f"Failed to load ambulance model from {key}: {error}") from error
     return _AMBULANCE_MODEL_CACHE[key]
 
 
@@ -431,6 +438,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run combined vehicle and ambulance detection from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     summary = process_video_with_emergency_detection(
         input_path=args.input,

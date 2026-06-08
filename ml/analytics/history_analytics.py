@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 
 CONGESTION_LEVELS = ["LOW_CONGESTION", "MEDIUM_CONGESTION", "HIGH_CONGESTION"]
@@ -30,9 +33,15 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
     """Read a CSV file when present; return an empty list when missing."""
 
     if not path.exists():
+        logger.warning(f"CSV log file does not exist, skipping read: {path}")
         return []
-    with path.open("r", newline="", encoding="utf-8") as csv_file:
-        return list(csv.DictReader(csv_file))
+    logger.info(f"Reading CSV log from: {path}")
+    try:
+        with path.open("r", newline="", encoding="utf-8") as csv_file:
+            return list(csv.DictReader(csv_file))
+    except Exception as error:
+        logger.error(f"Failed to read CSV log from {path}: {error}")
+        return []
 
 
 def _to_bool(value: str | bool | int | None) -> bool:
@@ -284,6 +293,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """Run historical analytics from the command line."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     args = build_arg_parser().parse_args()
     records = filter_records(
         load_historical_records(args.logs),

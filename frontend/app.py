@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -406,6 +407,7 @@ def render_historical_analytics(
 def main() -> None:
     """Run the Streamlit dashboard."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     configure_page()
 
     st.title("AI Emergency Vehicle Priority Dashboard")
