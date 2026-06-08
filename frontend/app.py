@@ -36,6 +36,9 @@ class DashboardImports:
     generate_event_statistics: Any
     generate_summary: Any
     generate_trend_data: Any
+    analyze_lanes: Any
+    default_lane_config: Any
+    draw_lane_overlay: Any
     get_video_metadata: Any
     is_emergency_present: Any
     iter_frames: Any
@@ -66,6 +69,7 @@ def load_dashboard_imports() -> DashboardImports | None:
         )
         from ml.analytics.priority_engine import draw_priority_overlay, generate_priority_action
         from ml.analytics.signal_timing_engine import generate_signal_timing_recommendation
+        from ml.analytics.lane_analyzer import analyze_lanes, default_lane_config, draw_lane_overlay
         from ml.analytics.history_analytics import (
             CONGESTION_LEVELS,
             RECOMMENDATION_ACTIONS,
@@ -109,6 +113,9 @@ def load_dashboard_imports() -> DashboardImports | None:
         generate_event_statistics=generate_event_statistics,
         generate_summary=generate_summary,
         generate_trend_data=generate_trend_data,
+        analyze_lanes=analyze_lanes,
+        default_lane_config=default_lane_config,
+        draw_lane_overlay=draw_lane_overlay,
         get_video_metadata=get_video_metadata,
         is_emergency_present=is_emergency_present,
         iter_frames=iter_frames,
@@ -204,6 +211,7 @@ def initial_results() -> dict[str, Any]:
         "signal_severity": "NORMAL",
         "signal_reason": "Low congestion detected",
         "signal_confidence_note": "Rule-based recommendation",
+        "lane_results": [],
         "processed_frames": 0,
         "latest_frame": None,
         "ambulance_message": "Ambulance model not available. Using detection infrastructure only.",
@@ -285,9 +293,51 @@ def analyze_uploaded_video(
                     },
                 )
 
+            frame_height, frame_width = frame.shape[:2]
+            lane_regions = imports.default_lane_config(frame_width=frame_width, frame_height=frame_height)
+            lane_results = imports.analyze_lanes(
+                vehicle_detections=vehicle_detections,
+                ambulance_detections=ambulance_detections,
+                frame_width=frame_width,
+                frame_height=frame_height,
+                lane_regions=lane_regions,
+            )
+            enriched_lane_results = []
+            for lane_result in lane_results:
+                lane_density_result = imports.analyze_density(
+                    {
+                        "total_vehicles": lane_result["total_vehicles"],
+                        "car_count": lane_result["car_count"],
+                        "motorcycle_count": lane_result["motorcycle_count"],
+                        "bus_count": lane_result["bus_count"],
+                        "truck_count": lane_result["truck_count"],
+                    }
+                )
+                lane_congestion_result = imports.classify_congestion(lane_density_result)
+                lane_action_result = imports.generate_priority_action(
+                    emergency_present=lane_result["emergency_present"],
+                    density_result=lane_density_result,
+                    congestion_result=lane_congestion_result,
+                )
+                lane_signal_result = imports.generate_signal_timing_recommendation(
+                    density_result=lane_density_result,
+                    congestion_result=lane_congestion_result,
+                    priority_result=lane_action_result,
+                )
+                enriched_lane_results.append(
+                    {
+                        **lane_result,
+                        "density": lane_density_result["density"],
+                        "congestion": lane_congestion_result["congestion"],
+                        "recommended_action": lane_action_result["recommended_action"],
+                        "recommended_green_seconds": lane_signal_result["recommended_green_seconds"],
+                    }
+                )
+
             annotated = imports.draw_density_overlay(annotated, density_result)
             annotated = imports.draw_congestion_overlay(annotated, congestion_result)
             annotated = imports.draw_priority_overlay(annotated, action_result)
+            annotated = imports.draw_lane_overlay(annotated, lane_regions, enriched_lane_results)
             latest_frame = imports.cv2.cvtColor(annotated, imports.cv2.COLOR_BGR2RGB)
 
             results = {
@@ -299,6 +349,7 @@ def analyze_uploaded_video(
                 "signal_severity": signal_timing_result["severity"],
                 "signal_reason": signal_timing_result["reason"],
                 "signal_confidence_note": signal_timing_result["confidence_note"],
+                "lane_results": enriched_lane_results,
                 "predicted_congestion": predicted_congestion,
                 "processed_frames": results["processed_frames"] + 1,
                 "latest_frame": latest_frame,
@@ -355,6 +406,29 @@ def render_dashboard(results: dict[str, Any]) -> None:
         render_status_card("Reason", results["signal_reason"])
     with signal_cols[1]:
         render_status_card("Confidence Note", results["signal_confidence_note"])
+
+    st.subheader("Multi-Lane Traffic Analysis")
+    lane_results = results.get("lane_results", [])
+    if lane_results:
+        st.dataframe(
+            [
+                {
+                    "Lane": lane["lane_name"],
+                    "Vehicles": lane["total_vehicles"],
+                    "Utilization": f"{lane['lane_utilization_percent']:.2f}%",
+                    "Density": lane["density"],
+                    "Congestion": lane["congestion"],
+                    "Emergency": "DETECTED" if lane["emergency_present"] else "NONE",
+                    "Action": lane["recommended_action"],
+                    "Green Time": f"{lane['recommended_green_seconds']} sec",
+                }
+                for lane in lane_results
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.markdown('<p class="section-note">Run analysis to display lane-level traffic results.</p>', unsafe_allow_html=True)
 
     if results["latest_frame"] is not None:
         st.image(results["latest_frame"], caption="Latest analyzed frame", use_container_width=True)
