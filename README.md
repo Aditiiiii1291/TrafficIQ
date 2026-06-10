@@ -133,7 +133,6 @@ The project includes a Streamlit dashboard for GitHub screenshots, resume demos,
 
 Suggested screenshot gallery:
 
-<<<<<<< HEAD
 =======
 ### Video Upload And Dashboard Home
 
