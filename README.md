@@ -133,11 +133,17 @@ The project includes a Streamlit dashboard for GitHub screenshots, resume demos,
 
 Planned screenshot placeholders:
 
-![Dashboard home](docs/screenshots/dashboard-home.png)
+![Dashboard home](docs\screenshots\dashboard.png)
 
-![Prediction panel](docs/screenshots/prediction-panel.png)
+![Traffic Analysis](docs\screenshots\traffic.png)
 
-![Historical analytics](docs/screenshots/historical-analytics.png)
+![Congestion panel](docs\screenshots\congestion.png)
+
+![Lane panel](docs\screenshots\lane.png)
+
+![Detection screen](docs\screenshots\pic.png)
+
+![Historical analytics](docs/screenshots/histogram.png)
 
 Dashboard sections:
 
@@ -444,20 +450,13 @@ Version 2 roadmap:
 
 | Phase | Roadmap Item | Description |
 | --- | --- | --- |
-| Phase 13 | FastAPI Backend | Add an API layer for serving analytics and model predictions. |
-| Phase 14 | Render Deployment | Deploy the Streamlit or API-enabled app for public demos. |
-| Phase 15 | Lane-wise Analytics | Track traffic density and emergency priority by lane. |
-| Phase 16 | Emergency ETA Estimation | Estimate emergency vehicle arrival timing from video-derived signals. |
-| Phase 17 | Emergency Corridor Scoring | Score route or corridor urgency using congestion and emergency presence. |
+| Phase 17 | FastAPI Backend | Add an API layer for serving analytics and model predictions. |
 | Phase 18 | ML Signal Recommendation Engine | Replace rule-only recommendations with trained decision support models. |
 | Phase 19 | Advanced Dashboard | Add richer visualizations, scenario comparisons, and portfolio polish. |
 
 These roadmap items are not implemented in the current repository.
 
 ## Project Status
-
-The project has completed production-readiness stabilization through Phase 11 and is now being upgraded for Phase 12 repository and portfolio presentation.
-
 Current status:
 
 - Documentation and portfolio presentation upgraded
