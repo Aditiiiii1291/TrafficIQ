@@ -131,19 +131,35 @@ Video input
 
 The project includes a Streamlit dashboard for GitHub screenshots, resume demos, and project presentations.
 
-Planned screenshot placeholders:
+Suggested screenshot gallery:
 
-![Dashboard home](docs\screenshots\dashboard.png)
+<<<<<<< HEAD
+=======
+### Video Upload And Dashboard Home
 
-![Traffic Analysis](docs\screenshots\traffic.png)
+![Dashboard upload and video preview](docs/screenshots/dashboard.png)
 
-![Congestion panel](docs\screenshots\congestion.png)
+### Traffic Overview And Ambulance Detection
 
-![Lane panel](docs\screenshots\lane.png)
+![Traffic overview and ambulance detection details](docs/screenshots/traffic.png)
 
-![Detection screen](docs\screenshots\pic.png)
+### Congestion And Smart Signal Timing
 
-![Historical analytics](docs/screenshots/histogram.png)
+![Congestion analysis and smart signal timing](docs/screenshots/congestion.png)
+
+### Multi-Lane And Green Corridor Analysis
+
+![Multi-lane traffic analysis and green corridor simulation](docs/screenshots/lane.png)
+
+### Annotated Detection Output
+
+![Annotated traffic detection frame with lane overlays](docs/screenshots/pic.png)
+
+### Historical Analytics
+
+![Historical analytics dashboard](docs/screenshots/histogram.png)
+
+>>>>>>> bcf9f4d (docs: add dashboard screenshots and update README)
 
 Dashboard sections:
 
@@ -466,4 +482,3 @@ Current status:
 - CPU-only target
 - YOLOv8n baseline detector
 - 56 automated tests passing
-
