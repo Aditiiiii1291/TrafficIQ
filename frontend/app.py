@@ -227,7 +227,11 @@ def initial_results() -> dict[str, Any]:
         },
         "processed_frames": 0,
         "latest_frame": None,
-        "ambulance_message": "Ambulance model not available. Using detection infrastructure only.",
+        "ambulance_message": "Multi-Signal Ambulance Detection Pipeline Active.",
+        "ambulance_detected": False,
+        "ambulance_confidence": 0.0,
+        "emergency_light_score": 0.0,
+        "ambulance_reason": "No analysis run",
     }
 
 
@@ -249,11 +253,15 @@ def analyze_uploaded_video(
         prediction_model = imports.load_congestion_model(model_path)
 
     ambulance_model = None
-    ambulance_message = "Ambulance model not available. Using detection infrastructure only."
     ambulance_model_path = imports.resolve_ambulance_model_path()
     if ambulance_model_path.exists():
-        ambulance_model = imports.load_ambulance_model(ambulance_model_path)
-        ambulance_message = f"Ambulance model loaded: {ambulance_model_path}"
+        try:
+            ambulance_model = imports.load_ambulance_model(ambulance_model_path)
+            ambulance_message = f"Ambulance model loaded: {ambulance_model_path}"
+        except Exception as error:
+            ambulance_message = f"Error loading custom ambulance model: {error}. Using fallback."
+    else:
+        ambulance_message = "Multi-Signal Pipeline Active (using generic vehicle detections + HSV light detection)."
 
     results = initial_results()
 
@@ -273,14 +281,14 @@ def analyze_uploaded_video(
                 source_video=str(video_path),
             )
 
-            ambulance_detections = []
-            if ambulance_model is not None:
-                annotated, ambulance_detections = imports.detect_ambulances(
-                    frame=frame,
-                    model=ambulance_model,
-                    confidence_threshold=ambulance_confidence,
-                    base_frame=annotated,
-                )
+            # Always call detect_ambulances and pass vehicle_detections for candidate extraction
+            annotated, ambulance_detections = imports.detect_ambulances(
+                frame=frame,
+                model=ambulance_model,
+                confidence_threshold=ambulance_confidence,
+                base_frame=annotated,
+                vehicle_detections=vehicle_detections,
+            )
 
             vehicle_counts = imports.count_vehicle_detections(vehicle_detections)
             density_result = imports.analyze_density(vehicle_counts)
@@ -358,6 +366,7 @@ def analyze_uploaded_video(
             annotated = imports.draw_lane_overlay(annotated, lane_regions, enriched_lane_results)
             latest_frame = imports.cv2.cvtColor(annotated, imports.cv2.COLOR_BGR2RGB)
 
+            frame_summary = getattr(ambulance_detections, "frame_summary", {})
             results = {
                 **density_result,
                 **congestion_result,
@@ -373,6 +382,10 @@ def analyze_uploaded_video(
                 "processed_frames": results["processed_frames"] + 1,
                 "latest_frame": latest_frame,
                 "ambulance_message": ambulance_message,
+                "ambulance_detected": frame_summary.get("ambulance_detected", False),
+                "ambulance_confidence": frame_summary.get("confidence", 0.0),
+                "emergency_light_score": frame_summary.get("emergency_light_score", 0.0),
+                "ambulance_reason": "; ".join(frame_summary.get("reason", [])) if frame_summary.get("reason") else "No vehicle candidates detected",
             }
 
     return results
@@ -400,6 +413,17 @@ def render_dashboard(results: dict[str, Any]) -> None:
         render_status_card("Emergency Status", "DETECTED" if results["emergency_present"] else "NONE")
     with emergency_cols[1]:
         st.info(results["ambulance_message"])
+
+    st.subheader("Ambulance Detection Details")
+    detail_cols = st.columns(4)
+    with detail_cols[0]:
+        render_status_card("Ambulance Detected", "True" if results.get("ambulance_detected", False) else "False")
+    with detail_cols[1]:
+        render_status_card("Confidence", f"{results.get('ambulance_confidence', 0.0):.4f}")
+    with detail_cols[2]:
+        render_status_card("Emergency Light Score", f"{results.get('emergency_light_score', 0.0):.4f}")
+    with detail_cols[3]:
+        render_status_card("Detection Reason", results.get("ambulance_reason", "N/A"))
 
     st.subheader("Congestion Analysis")
     congestion_cols = st.columns(2)

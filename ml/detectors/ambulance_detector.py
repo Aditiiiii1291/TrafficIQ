@@ -13,10 +13,12 @@ import logging
 import os
 import sys
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +39,23 @@ DEFAULT_AMBULANCE_MODEL_PATH = Path("data/models/ambulance_detector.pt")
 AMBULANCE_CLASS_NAMES = {"ambulance", "emergency vehicle", "emergency_vehicle"}
 AMBULANCE_COLOR = (40, 40, 255)
 AMBULANCE_MODEL_ENV_VAR = "AMBULANCE_MODEL_PATH"
+AMBULANCE_KEYWORDS = ["ambulance", "emergency", "ems"]
+AMBULANCE_CANDIDATE_CLASSES = {"car", "truck", "bus", "van", "ambulance"}
+MIN_AMBULANCE_CONFIDENCE = 0.55
+DEFAULT_AMBULANCE_LOG_PATH = Path("data/logs/ambulance_detection_log.csv")
+AMBULANCE_LOG_COLUMNS = [
+    "timestamp",
+    "ambulance_detected",
+    "confidence",
+    "emergency_light_score",
+    "reason",
+]
+
+CONFIDENCE_WEIGHTS = {
+    "vehicle": 0.4,
+    "emergency_light": 0.3,
+    "visual_heuristic": 0.3,
+}
 
 _AMBULANCE_MODEL_CACHE: dict[str, YOLO] = {}
 logger = logging.getLogger(__name__)
@@ -61,6 +80,25 @@ class EmergencyDetectionSummary:
     emergency_detected: bool
 
 
+@dataclass(frozen=True)
+class AmbulanceDetectionLogRecord:
+    """CSV-compatible ambulance detection summary record."""
+
+    timestamp: str
+    ambulance_detected: bool
+    confidence: float
+    emergency_light_score: float
+    reason: str
+
+
+class AmbulanceDetections(list):
+    """A list of ambulance detections with frame-level metadata attached."""
+
+    def __init__(self, detections: list[dict[str, Any]], frame_summary: dict[str, Any]):
+        super().__init__(detections)
+        self.frame_summary = frame_summary
+
+
 def resolve_ambulance_model_path(model_path: str | Path | None = None) -> Path:
     """Resolve the ambulance model path from an argument, env var, or default."""
 
@@ -80,10 +118,19 @@ def load_ambulance_model(model_path: str | Path | None = None) -> YOLO:
     The default path is `data/models/ambulance_detector.pt`, but callers can
     pass a different path or set AMBULANCE_MODEL_PATH. This keeps model loading
     isolated for future fine-tuned weights.
+    
+    If the resolved model file does not exist and it is the default path, 
+    we fall back to loading the generic YOLO vehicle model.
     """
 
     resolved_path = resolve_ambulance_model_path(model_path)
     key = str(resolved_path)
+
+    # Fallback to yolov8n.pt if default path is not found
+    if not resolved_path.exists() and key == str(DEFAULT_AMBULANCE_MODEL_PATH):
+        logger.info(f"Ambulance model path {key} not found. Falling back to yolov8n.pt")
+        key = "yolov8n.pt"
+
     if key not in _AMBULANCE_MODEL_CACHE:
         logger.info(f"Loading YOLO ambulance model from: {key}")
         try:
@@ -114,6 +161,110 @@ def get_ambulance_class_ids(model: YOLO) -> list[int]:
     return matches or [0]
 
 
+def _read_attr_or_key(value: Any, name: str, default: Any = None) -> Any:
+    """Read a field from a dictionary or object detection."""
+
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Normalize float-like values without raising."""
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_bbox(detection: Any) -> list[int] | None:
+    """Extract a bbox from a dict or dataclass detection."""
+
+    try:
+        bbox = _read_attr_or_key(detection, "bbox")
+        if bbox is not None and len(bbox) == 4:
+            return [int(value) for value in bbox]
+        return [
+            int(_read_attr_or_key(detection, "xmin")),
+            int(_read_attr_or_key(detection, "ymin")),
+            int(_read_attr_or_key(detection, "xmax")),
+            int(_read_attr_or_key(detection, "ymax")),
+        ]
+    except (TypeError, ValueError):
+        logger.warning(f"Skipping malformed ambulance candidate bbox: {detection}")
+        return None
+
+
+def _clip_bbox_to_frame(bbox: list[int], frame: Any) -> list[int]:
+    """Clamp bbox coordinates to frame bounds."""
+
+    height, width = frame.shape[:2]
+    xmin, ymin, xmax, ymax = bbox
+    return [
+        max(0, min(width, xmin)),
+        max(0, min(height, ymin)),
+        max(0, min(width, xmax)),
+        max(0, min(height, ymax)),
+    ]
+
+
+def _crop_frame(frame: Any, bbox: list[int]) -> Any:
+    """Return a safe frame crop for a bbox."""
+
+    xmin, ymin, xmax, ymax = _clip_bbox_to_frame(bbox, frame)
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    return frame[ymin:ymax, xmin:xmax]
+
+
+def _count_color_regions(mask: Any, min_area: int = 2) -> int:
+    """Count color regions from a binary mask. Minimal area is 2 pixels for vehicle crops."""
+
+    contours, _hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return sum(1 for contour in contours if cv2.contourArea(contour) >= min_area)
+
+
+def detect_emergency_lights(frame: Any) -> dict[str, int | float]:
+    """Detect red and blue emergency-light-like regions using HSV thresholds."""
+
+    try:
+        if frame is None or not hasattr(frame, "shape") or frame.size == 0:
+            return {"red_regions": 0, "blue_regions": 0, "emergency_light_score": 0.0}
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        # Saturated, bright red ranges
+        red_mask_low = cv2.inRange(hsv, (0, 100, 150), (10, 255, 255))
+        red_mask_high = cv2.inRange(hsv, (170, 100, 150), (180, 255, 255))
+        red_mask = cv2.bitwise_or(red_mask_low, red_mask_high)
+
+        # Saturated, bright blue range
+        blue_mask = cv2.inRange(hsv, (100, 100, 150), (140, 255, 255))
+
+        red_regions = _count_color_regions(red_mask)
+        blue_regions = _count_color_regions(blue_mask)
+
+        # Base scoring logic
+        if red_regions > 0 and blue_regions > 0:
+            score = min(1.0, 0.6 + 0.1 * (red_regions + blue_regions))
+        elif red_regions > 0:
+            score = min(0.4, 0.1 * red_regions)
+        elif blue_regions > 0:
+            score = min(0.5, 0.15 * blue_regions)
+        else:
+            score = 0.0
+
+        return {
+            "red_regions": int(red_regions),
+            "blue_regions": int(blue_regions),
+            "emergency_light_score": round(float(score), 4),
+        }
+    except Exception as error:
+        logger.warning(f"Emergency light detection failed: {error}")
+        return {"red_regions": 0, "blue_regions": 0, "emergency_light_score": 0.0}
+
+
 def _normalize_bbox(box: Any) -> list[int]:
     """Convert a YOLO box into [xmin, ymin, xmax, ymax]."""
 
@@ -132,9 +283,157 @@ def _extract_ambulance_detections(results: list[Any]) -> list[dict[str, object]]
                     "class_name": "ambulance",
                     "confidence": round(float(box.conf[0].item()), 4),
                     "bbox": _normalize_bbox(box),
+                    "ambulance_detected": True,
+                    "reason": ["YOLO ambulance class detected"],
+                    "emergency_light_score": 0.0,
                 }
             )
 
+    return detections
+
+
+def _candidate_vehicle_score(detection: Any) -> float:
+    """Score a detected vehicle class as an ambulance candidate."""
+
+    class_name = str(_read_attr_or_key(detection, "class_name", "")).strip().lower()
+    confidence = _safe_float(_read_attr_or_key(detection, "confidence"), 0.0)
+    if class_name in {"truck", "bus", "van", "ambulance"}:
+        return max(confidence, 0.75)
+    if class_name == "car":
+        return max(confidence, 0.55)
+    return 0.0
+
+
+def _visual_heuristic_score(detection: Any) -> tuple[float, list[str]]:
+    """Score lightweight visual/candidate heuristics from detection metadata."""
+
+    class_name = str(_read_attr_or_key(detection, "class_name", "")).strip().lower()
+    bbox = _safe_bbox(detection)
+    reasons: list[str] = []
+    score = 0.0
+
+    if any(keyword in class_name for keyword in AMBULANCE_KEYWORDS):
+        score += 0.8
+        reasons.append("Ambulance keyword detected")
+    if class_name in AMBULANCE_CANDIDATE_CLASSES:
+        score += 0.35
+        reasons.append("Vehicle classified as ambulance candidate")
+    if bbox is not None:
+        xmin, ymin, xmax, ymax = bbox
+        width = max(0, xmax - xmin)
+        height = max(0, ymax - ymin)
+        aspect_ratio = width / height if height else 0.0
+        if 1.2 <= aspect_ratio <= 3.8:
+            score += 0.25
+            reasons.append("Emergency vehicle-like shape detected")
+
+    return min(1.0, score), reasons
+
+
+def calculate_ambulance_confidence(
+    vehicle_confidence: float,
+    emergency_light_score: float,
+    visual_heuristic_score: float,
+) -> float:
+    """Calculate final ambulance confidence from weighted rule scores."""
+
+    confidence = (
+        CONFIDENCE_WEIGHTS["vehicle"] * max(0.0, min(1.0, vehicle_confidence))
+        + CONFIDENCE_WEIGHTS["emergency_light"] * max(0.0, min(1.0, emergency_light_score))
+        + CONFIDENCE_WEIGHTS["visual_heuristic"] * max(0.0, min(1.0, visual_heuristic_score))
+    )
+    return round(float(max(0.0, min(1.0, confidence))), 4)
+
+
+def evaluate_ambulance_confidence(
+    vehicle_confidence: float,
+    emergency_light_score: float,
+    visual_heuristic_score: float,
+    reasons: list[str] | None = None,
+    min_confidence_threshold: float = MIN_AMBULANCE_CONFIDENCE,
+) -> dict[str, Any]:
+    """Combine YOLO detection confidence, emergency light score, and visual heuristics.
+
+    Returns:
+        dict: {
+            "ambulance_detected": bool,
+            "confidence": float,
+            "reason": list[str]
+        }
+    """
+    confidence = calculate_ambulance_confidence(
+        vehicle_confidence,
+        emergency_light_score,
+        visual_heuristic_score
+    )
+    
+    detected = confidence >= min_confidence_threshold
+    
+    out_reasons = list(reasons) if reasons is not None else []
+    if detected:
+        out_reasons.append(f"Ambulance verified: combined confidence {confidence:.4f} >= threshold {min_confidence_threshold:.4f}")
+    else:
+        out_reasons.append(f"Not an ambulance: combined confidence {confidence:.4f} < threshold {min_confidence_threshold:.4f}")
+        
+    return {
+        "ambulance_detected": detected,
+        "confidence": confidence,
+        "reason": out_reasons,
+    }
+
+
+def evaluate_ambulance_candidate(frame: Any, detection: Any) -> dict[str, object] | None:
+    """Evaluate one vehicle detection as a possible ambulance."""
+
+    bbox = _safe_bbox(detection)
+    if bbox is None:
+        return None
+
+    vehicle_score = _candidate_vehicle_score(detection)
+    if vehicle_score <= 0:
+        return None
+
+    crop = _crop_frame(frame, bbox)
+    light_result = detect_emergency_lights(crop)
+    light_score = float(light_result["emergency_light_score"])
+    visual_score, reasons = _visual_heuristic_score(detection)
+
+    if light_score > 0:
+        reasons.insert(0, "Emergency light pattern detected")
+
+    confidence_result = evaluate_ambulance_confidence(
+        vehicle_confidence=vehicle_score,
+        emergency_light_score=light_score,
+        visual_heuristic_score=visual_score,
+        reasons=reasons,
+    )
+
+    return {
+        "class_name": "ambulance",
+        "ambulance_detected": confidence_result["ambulance_detected"],
+        "confidence": confidence_result["confidence"],
+        "bbox": bbox,
+        "reason": confidence_result["reason"],
+        "emergency_light_score": round(light_score, 4),
+        "vehicle_score": round(vehicle_score, 4),
+        "visual_heuristic_score": round(visual_score, 4),
+    }
+
+
+def evaluate_ambulance_detections(
+    frame: Any,
+    vehicle_detections: list[Any] | None = None,
+) -> list[dict[str, object]]:
+    """Evaluate all vehicle detections as possible ambulances."""
+
+    if frame is None or not hasattr(frame, "shape"):
+        return []
+
+    detections: list[dict[str, object]] = []
+    for detection in vehicle_detections or []:
+        candidate = evaluate_ambulance_candidate(frame, detection)
+        if candidate is not None and candidate["ambulance_detected"]:
+            detections.append(candidate)
     return detections
 
 
@@ -200,28 +499,142 @@ def detect_ambulances(
     model: YOLO | None = None,
     confidence_threshold: float = 0.35,
     base_frame: Any | None = None,
+    vehicle_detections: list[Any] | None = None,
 ) -> tuple[Any, list[dict[str, object]]]:
     """Detect ambulances in one frame and return annotated frame plus detections."""
 
-    detector = model if model is not None else load_ambulance_model()
-    results = detector.predict(
-        source=frame,
-        conf=confidence_threshold,
-        classes=get_ambulance_class_ids(detector),
-        verbose=False,
-    )
-    detections = _extract_ambulance_detections(results)
+    detections: list[dict[str, object]] = []
+
+    # If vehicle_detections is not provided, run fallback generic vehicle detector
+    if vehicle_detections is None:
+        try:
+            vehicle_model = load_yolo_model()
+            _, vehicle_detections = detect_vehicles(
+                frame=frame,
+                model=vehicle_model,
+                confidence_threshold=confidence_threshold,
+            )
+        except Exception as error:
+            logger.warning(f"Fallback vehicle candidate detection failed: {error}")
+            vehicle_detections = []
+
+    if model is not None:
+        try:
+            results = model.predict(
+                source=frame,
+                conf=confidence_threshold,
+                classes=get_ambulance_class_ids(model),
+                verbose=False,
+            )
+            detections.extend(_extract_ambulance_detections(results))
+        except Exception as error:
+            logger.warning(f"YOLO ambulance inference failed; falling back to heuristic detection: {error}")
+    else:
+        logger.info("No ambulance YOLO model supplied; using heuristic ambulance detection.")
+
+    # Evaluate all vehicle candidates
+    all_candidates = []
+    for detection in vehicle_detections or []:
+        candidate = evaluate_ambulance_candidate(frame, detection)
+        if candidate is not None:
+            all_candidates.append(candidate)
+
+    # Detections that actually pass the threshold
+    passing_detections = [c for c in all_candidates if c["ambulance_detected"]]
+    detections.extend(passing_detections)
+
+    # Calculate frame summary (incorporating candidates that didn't pass, for detailed reporting)
+    summary = summarize_ambulance_detection(passing_detections, all_candidates)
+
+    # Log results to CSV
+    record = build_ambulance_detection_log_record(summary)
+    write_ambulance_detection_log(record)
 
     annotated = base_frame.copy() if base_frame is not None else frame.copy()
     annotated = draw_ambulance_detections(annotated, detections)
     annotated = draw_emergency_status(annotated, detections)
-    return annotated, detections
+
+    return annotated, AmbulanceDetections(detections, summary)
 
 
 def is_emergency_present(detections: list[dict[str, object]]) -> bool:
     """Return True when at least one ambulance detection is present."""
 
-    return len(detections) > 0
+    return any(bool(detection.get("ambulance_detected", True)) for detection in detections)
+
+
+def summarize_ambulance_detection(
+    detections: list[dict[str, object]],
+    all_candidates: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Summarize ambulance detections for dashboard display and logging."""
+
+    if detections:
+        best_detection = max(detections, key=lambda item: float(item.get("confidence", 0.0)))
+        return {
+            "ambulance_detected": True,
+            "confidence": round(float(best_detection.get("confidence", 0.0)), 4),
+            "reason": list(best_detection.get("reason", [])) or ["Ambulance candidate detected"],
+            "emergency_light_score": round(float(best_detection.get("emergency_light_score", 0.0)), 4),
+        }
+
+    if all_candidates:
+        best_candidate = max(all_candidates, key=lambda item: float(item.get("confidence", 0.0)))
+        return {
+            "ambulance_detected": False,
+            "confidence": round(float(best_candidate.get("confidence", 0.0)), 4),
+            "reason": list(best_candidate.get("reason", [])) or ["Vehicle candidate evaluated"],
+            "emergency_light_score": round(float(best_candidate.get("emergency_light_score", 0.0)), 4),
+        }
+
+    return {
+        "ambulance_detected": False,
+        "confidence": 0.0,
+        "reason": ["No vehicle candidates detected"],
+        "emergency_light_score": 0.0,
+    }
+
+
+def build_ambulance_detection_log_record(
+    detection_summary: dict[str, object],
+    timestamp: str | None = None,
+) -> AmbulanceDetectionLogRecord:
+    """Build a CSV-compatible ambulance detection summary record."""
+
+    reasons = detection_summary.get("reason", [])
+    if isinstance(reasons, list):
+        reason_text = "; ".join(str(reason) for reason in reasons)
+    else:
+        reason_text = str(reasons)
+
+    return AmbulanceDetectionLogRecord(
+        timestamp=timestamp or datetime.now().isoformat(timespec="seconds"),
+        ambulance_detected=bool(detection_summary.get("ambulance_detected", False)),
+        confidence=round(float(detection_summary.get("confidence", 0.0)), 4),
+        emergency_light_score=round(float(detection_summary.get("emergency_light_score", 0.0)), 4),
+        reason=reason_text,
+    )
+
+
+def write_ambulance_detection_log(
+    record: AmbulanceDetectionLogRecord,
+    log_path: str | Path = DEFAULT_AMBULANCE_LOG_PATH,
+) -> bool:
+    """Write ambulance detection summary logs without crashing callers."""
+
+    path = Path(log_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_exists = path.exists()
+        with path.open("a", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=AMBULANCE_LOG_COLUMNS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(asdict(record))
+        return True
+    except Exception as error:
+        logger.error(f"Failed to write ambulance detection log to {path}: {error}")
+        return False
 
 
 def _ambulance_log_rows(
@@ -291,9 +704,11 @@ def process_video_with_emergency_detection(
     source = validate_video_path(input_path)
     metadata = get_video_metadata(source)
     vehicle_model = load_yolo_model(vehicle_model_path)
-    ambulance_model = load_ambulance_model(ambulance_model_path)
     resolved_ambulance_model_path = resolve_ambulance_model_path(ambulance_model_path)
-
+    
+    # Load model using load_ambulance_model, which handles default PT check and fallback internally
+    ambulance_model = load_ambulance_model(resolved_ambulance_model_path)
+    
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -332,6 +747,7 @@ def process_video_with_emergency_detection(
                 model=ambulance_model,
                 confidence_threshold=ambulance_confidence_threshold,
                 base_frame=vehicle_annotated,
+                vehicle_detections=vehicle_detections,
             )
 
             log_rows.extend(asdict(detection) for detection in vehicle_detections)
