@@ -481,4 +481,4 @@ Current status:
 - CSV-first storage
 - CPU-only target
 - YOLOv8n baseline detector
-- 56 automated tests passing
+- 96 automated tests passing
