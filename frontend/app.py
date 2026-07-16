@@ -1,4 +1,4 @@
-"""Streamlit dashboard for the emergency vehicle priority demo."""
+"""Streamlit dashboard for the TrafficIQ demo."""
 
 from __future__ import annotations
 
@@ -154,7 +154,8 @@ def configure_page() -> None:
     """Apply page configuration and lightweight dashboard styling."""
 
     st.set_page_config(
-        page_title="Emergency Vehicle Priority Dashboard",
+        page_title="TrafficIQ - AI-Powered Intelligent Traffic Management System",
+        page_icon="🚦",
         layout="wide",
     )
 
@@ -717,8 +718,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     configure_page()
 
-    st.title("AI Emergency Vehicle Priority Dashboard")
-    st.caption("Video-based traffic monitoring and simulated priority recommendations.")
+    st.title("TrafficIQ Dashboard")
+    st.caption("AI-Powered Intelligent Traffic Management System")
 
     imports = load_dashboard_imports()
 

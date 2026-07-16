@@ -1,4 +1,4 @@
-# AI-Powered Emergency Vehicle Priority System
+# TrafficIQ: AI-Powered Intelligent Traffic Management System
 
 ## Overview
 

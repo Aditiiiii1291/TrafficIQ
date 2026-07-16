@@ -1,4 +1,4 @@
-# AI-Powered Emergency Vehicle Priority & Traffic Intelligence Platform
+# TrafficIQ: AI-Powered Intelligent Traffic Management System
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![YOLOv8](https://img.shields.io/badge/YOLOv8-Computer%20Vision-green)
@@ -9,7 +9,7 @@
 ![Status](https://img.shields.io/badge/status-portfolio%20ready-blueviolet)
 ![CI](https://img.shields.io/badge/CI%2FCD-planned-lightgrey)
 
-A AI platform that analyzes traffic videos, detects vehicles and emergency vehicles, estimates traffic density, classifies congestion, predicts congestion levels, and recommends simulated emergency priority actions through an interactive Streamlit dashboard.
+TrafficIQ is an AI-powered intelligent traffic management system that analyzes traffic videos, detects vehicles and emergency vehicles, estimates traffic density, classifies congestion, predicts congestion levels, and recommends simulated emergency priority actions through an interactive Streamlit dashboard.
 
 This project is a software simulation and analytics platform. It does not control real traffic lights, emergency infrastructure, IoT hardware, GPS systems, or siren/audio devices.
 
@@ -178,7 +178,7 @@ Status cards:
 ## Project Structure
 
 ```text
-AI-Emergency-Vehicle-Priority-System/
+TrafficIQ/
 ├── .github/
 │   └── workflows/
 │       └── .gitkeep

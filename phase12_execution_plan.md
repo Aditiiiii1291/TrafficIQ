@@ -40,7 +40,7 @@ The current README is functional but reads more like phase-by-phase project note
 
 Primary weaknesses:
 
-- The project title does not yet use the stronger Phase 12 positioning: `AI-Powered Emergency Vehicle Priority & Traffic Intelligence Platform`
+- The project title does not yet use the new brand: `TrafficIQ: AI-Powered Intelligent Traffic Management System`
 - No professional hero section with concise value proposition, badges, and status badge placeholder
 - Key features are distributed across phase sections instead of presented clearly near the top
 - The architecture is described textually but lacks a final Mermaid architecture diagram
@@ -108,7 +108,7 @@ These PNG files will not be created unless real screenshots are captured in a la
 Expected structure after Phase 12 implementation:
 
 ```text
-AI-Emergency-Vehicle-Priority-System/
+TrafficIQ/
 ├── .github/
 │   └── workflows/
 │       └── .gitkeep
@@ -197,7 +197,7 @@ Planned README sections:
 The README will explicitly present the project as:
 
 ```text
-AI-Powered Emergency Vehicle Priority & Traffic Intelligence Platform
+TrafficIQ: AI-Powered Intelligent Traffic Management System
 ```
 
 The README will keep claims honest:
@@ -235,7 +235,7 @@ git status --short
 2. Confirm the README contains the required sections:
 
 ```powershell
-rg "AI-Powered Emergency Vehicle Priority & Traffic Intelligence Platform|Key Features|System Architecture|Dashboard Preview|Testing|Deployment|Limitations|Future Roadmap|CI/CD" README.md
+rg "TrafficIQ: AI-Powered Intelligent Traffic Management System|Key Features|System Architecture|Dashboard Preview|Testing|Deployment|Limitations|Future Roadmap|CI/CD" README.md
 ```
 
 3. Confirm screenshot placeholders are references only and no fake PNG files were created:
