@@ -8,14 +8,21 @@ from backend.database.session import get_db
 from backend.repositories.processing_repository import ProcessingRepository
 from backend.schemas.schemas import AnalyticsResponse, TrafficStats, TrendData, EventStats
 
+from backend.auth.security import get_current_active_user
+from backend.models.user import User
+
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("", response_model=AnalyticsResponse)
-async def get_analytics(db: Session = Depends(get_db)):
+async def get_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Retrieve aggregated traffic flow statistics, congestion trends, and metrics from database."""
-    logger.info("Fetching database analytics summary")
+    logger.info(f"Fetching database analytics summary for user {current_user.email}")
     try:
-        results = ProcessingRepository.get_all_processing_results(db=db)
+        user_id = None if current_user.role.lower() == "admin" else current_user.id
+        results = ProcessingRepository.get_all_processing_results(db=db, user_id=user_id)
         
         if not results:
             # Return empty response metrics safely

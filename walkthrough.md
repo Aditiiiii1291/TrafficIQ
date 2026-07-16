@@ -1,57 +1,61 @@
-# Walkthrough - Phase 5: React Frontend
+# Walkthrough - Phase 6: User Management & Authentication
 
-We have successfully completed **Phase 5: React Frontend** of the TrafficIQ development roadmap. The legacy Streamlit frontend has been replaced with a high-performance, modern React 19 web application built using Vite, TypeScript, and Tailwind CSS v4.
-
-The React frontend communicates exclusively with the FastAPI REST API using Axios and TanStack Query, leaving the core AI models, databases, and business services completely untouched.
-
-## Architecture & Structure
-
-Scaffolded project structure under `frontend-react/`:
-- **`src/api/`:** Creates a reusable, configured Axios client (`client.ts`) pointing to `http://127.0.0.1:8000`.
-- **`src/types/`:** Contains full TypeScript interfaces matching the Pydantic REST models (`index.ts`).
-- **`src/services/`:** Encapsulates service requests for REST actions (`apiService.ts`).
-- **`src/layouts/`:** Hosts the core application shell (`DashboardLayout.tsx`), complete with sidebar and responsive mobile views.
-- **`src/pages/`:** Houses modular, premium dashboard pages:
-  - `Dashboard.tsx`: Displays summary statistics cards, recent activities, and preemption overrides.
-  - `UploadVideo.tsx`: Supports drag-and-drop video uploads, format verification, and Yolo processing configurations.
-  - `Results.tsx`: Renders full processing analysis reports, vehicle counts, lane lists, and preemption recommendations.
-  - `Analytics.tsx`: Integrates Recharts charts showing vehicle timelines, densities, and congestion shares.
-  - `History.tsx`: Displays historical run lists with search, congestion level, and recommendation dropdown filters.
-  - `NotFound.tsx`: Renders the default 404 page.
+We have successfully completed **Phase 6: User Management & Authentication** of the TrafficIQ development roadmap. The application now features secure user authentication and authorization (roles User and Admin) along with user-specific data tracking, ensuring that users see only their own processing reports and histories.
 
 ## Changes Made
 
-### 1. Created React 19 Frontend Project (`frontend-react/`)
-- Scaffolder: Vite + TypeScript + React templates.
-- Configured Vite with `@tailwindcss/vite` compiler plugin for native Tailwind CSS v4 styling.
-- Installed `react-router-dom`, `axios`, `@tanstack/react-query`, `recharts`, and `lucide-react`.
+### 1. Database Model Additions and Refactorings
+- Created the [user.py](file:///c:/Users/saksh/Desktop/AI-Emergency-Vehicle-Priority-System/backend/models/user.py) model class defining:
+  - `id`, `full_name`, `email` (unique, indexed), `password_hash`, `role` (Admin/User), `is_active`, and timestamps.
+  - Relational mapping allowing one user to own multiple video processing runs.
+- Updated the [video.py](file:///c:/Users/saksh/Desktop/AI-Emergency-Vehicle-Priority-System/backend/models/video.py) model class to add `user_id` as a foreign key linked to the `users` table.
+- Consolidated imports inside `backend/models/__init__.py` and `backend/database/base.py`.
 
-### 2. Configured Tailwind CSS v4 Styles
-- Overwrote `src/index.css` using `@import "tailwindcss";` directives and configured base body overlays.
-- Created premium glassmorphism layouts (`backdrop-blur-md bg-slate-900/60 border border-slate-800`), custom scroll bars, and gradient badges.
+### 2. Built Backend Security and JWT Utilities (`backend/auth/`)
+- **`hashing.py`:** Implemented password hashing and verification using `passlib[bcrypt]`.
+- **`jwt.py`:** Configured JWT access token generation and signing using `python-jose` with cryptographic claims.
+- **`security.py`:** Implemented OAuth2 scheme-bearer token dependency getters (`get_current_user`, `get_current_active_user`, `get_admin_user`) to secure REST routers.
+- **`auth_routes.py`:** Exposed registration and user profile management endpoints:
+  - `POST /auth/register`: Create user account (first registered user automatically becomes Admin).
+  - `POST /auth/login`: Authenticate credentials and return JWT token + user metadata.
+  - `POST /auth/logout`: Stateless logout feedback.
+  - `GET /auth/me`: Retrieve currently authenticated user profile.
+  - `PUT /auth/profile`: Update user full name or email (checks for duplicate usage).
+  - `PUT /auth/change-password`: Securely change password (verifies old password).
+  - `DELETE /auth/account`: Remove account and cascade delete user-owned records.
 
-### 3. Integrated State Management and API Services
-- Implemented TanStack Query (`App.tsx`) to manage cache lifecycles, query keys, and polling routines for recent activities.
+### 3. Secured Existing Backend Routes
+- Secured `POST /upload`, `POST /process`, `GET /history`, `GET /analytics`, and `GET /results/{record_id}` to require valid JWT authentication.
+- Linked new processed videos to the `current_user.id` when calling the analysis loop.
+- Enforced role-based access control (RBAC):
+  - Users with `User` role can query *only their own* upload history and analytics metrics.
+  - Users with `Admin` role can query *all* history and system-wide analytics.
 
-### 4. Back-End Synchronization
-- Added timestamp returns to `video_processor.py` results to support client-side redirection to generated report pages.
-- Registered the `timestamp` field in `ProcessingResult` Pydantic models.
+### 4. Built React Auth Shell and Protected Routes
+- **Axios Interceptor (`src/api/client.ts`):** Configured client to automatically append the JWT Bearer token to all outgoing request headers. Added response interceptor to auto-flush local session storage and redirect to `/login` if any REST response returns `401 Unauthorized`.
+- **TanStack useAuth Hook (`src/hooks/useAuth.tsx`):** Provides global authentication contexts (`user`, `login`, `register`, `logout`, `updateProfile`, etc.) caching session objects in `localStorage`.
+- **ProtectedRoute Guard (`src/components/ProtectedRoute.tsx`):** Renders page routes only if a valid authenticated user session exists, else redirects to `/login`.
+- **App Routes (`src/App.tsx`):** Enclosed dashboard layouts and child routes inside the `<ProtectedRoute>` guard, while registering `/login`, `/register`, and `/forgot-password` pages as public routes.
 
-## Verification Results
+### 5. Created Auth Pages
+- **`Login.tsx`:** Full email/password validation form, error feedback banners, and redirect links.
+- **`Register.tsx`:** Full sign-up form validating name, email, and password.
+- **`Profile.tsx`:** Allows updating names/emails.
+- **`Settings.tsx`:** Supports updating passwords and deleting user accounts.
+- **`ForgotPassword.tsx`:** Placeholder recovery page.
 
-### 1. Build Verification
-Ran the production compiler checks and build routines:
-```powershell
-npm run build
-```
-- **Result:** **Success!** Compiles and packages assets into the `dist/` directory cleanly in 1.82s without any TypeScript or compilation errors.
-```text
-dist/index.html                   0.46 kB │ gzip:   0.29 kB
-dist/assets/index-GqQzFsSW.css   44.39 kB │ gzip:   7.39 kB
-dist/assets/index-DuKYgQiI.js   746.31 kB │ gzip: 221.79 kB
-✓ built in 1.82s
-```
+### 6. Updated sidebar navigation (`DashboardLayout.tsx`)
+- Appended Profile and Settings navigation items.
+- Added Profile indicator badge showing full name and role.
+- Appended Logout button calling hooks callback.
 
-### 2. API Communication Validation
-- Verified standard CORS configurations in the FastAPI application allow requests from the Vite development server (`http://localhost:5173`).
-- Verified query parameters pass seamlessly for date, congestion, and preemption action filtering.
+## Database Migration Summary
+- Configured Alembic to generate schema migrations supporting SQLite batch mode operations to prevent table alter constraint failures.
+- Created migration script `b2199405f994_add_user_model_and_video_ownership.py`.
+- Executed `alembic upgrade head` to apply database table creations.
+
+## Verification & Test Results
+- [x] Run `pytest` to verify ML pipelines, priority timing engine, and analytics classes pass:
+  - **Result:** **91 passed** (0 failures).
+- [x] Ran production React compiler bundle build:
+  - **Result:** **Success!** Compiles and packages assets into the `dist/` directory cleanly in 2.53s without any TypeScript warnings or compilation errors.

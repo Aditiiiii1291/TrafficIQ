@@ -82,6 +82,7 @@ def analyze_video(
     skip_frames: int,
     vehicle_confidence: float,
     ambulance_confidence: float,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Run a bounded computer vision and analytics pipeline pass over a video file, saving run details to the database."""
     metadata = get_video_metadata(video_path)
@@ -93,7 +94,7 @@ def analyze_video(
     try:
         video = VideoRepository.get_video_by_filename(db, video_path.name)
         if not video:
-            video = VideoRepository.create_video(db, video_path.name)
+            video = VideoRepository.create_video(db, video_path.name, user_id=user_id)
         VideoRepository.update_video_status(db, video.id, "processing")
     except Exception as db_err:
         logger.error(f"Failed to create video record in database: {db_err}")

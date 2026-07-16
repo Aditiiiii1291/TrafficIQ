@@ -8,6 +8,9 @@ from backend.database.session import get_db
 from backend.repositories.processing_repository import ProcessingRepository
 from backend.schemas.schemas import HistoryResponse, HistoricalRecordModel
 
+from backend.auth.security import get_current_active_user
+from backend.models.user import User
+
 router = APIRouter(prefix="/history", tags=["History"])
 
 @router.get("", response_model=HistoryResponse)
@@ -15,16 +18,20 @@ async def get_history(
     date_filter: Optional[str] = Query(None, description="Prefix to filter records by timestamp"),
     congestion_level: str = Query("ALL", description="Filter records by congestion level"),
     recommendation: str = Query("ALL", description="Filter records by recommendation action"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Retrieve historical processing logs and records from the database with optional filtering."""
-    logger.info(f"Fetching history logs from DB (date={date_filter}, congestion={congestion_level}, recommendation={recommendation})")
+    logger.info(f"Fetching history logs from DB for user {current_user.email} (date={date_filter}, congestion={congestion_level}, recommendation={recommendation})")
     try:
+        # User sees only their own history; Admin sees all history
+        user_id = None if current_user.role.lower() == "admin" else current_user.id
         results = ProcessingRepository.get_all_processing_results(
             db=db,
             date_filter=date_filter,
             congestion_level=congestion_level,
-            recommendation=recommendation
+            recommendation=recommendation,
+            user_id=user_id
         )
         
         formatted_records = []

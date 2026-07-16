@@ -3,16 +3,21 @@
 import base64
 import cv2
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from backend.core.config import UPLOAD_DIR
 from backend.core.logger import logger
 from backend.services.video_processor import analyze_video
 from backend.schemas.schemas import ProcessRequest, ProcessingResult
+from backend.auth.security import get_current_active_user
+from backend.models.user import User
 
 router = APIRouter(prefix="/process", tags=["Processing"])
 
 @router.post("", response_model=ProcessingResult)
-async def process_video(request: ProcessRequest):
+async def process_video(
+    request: ProcessRequest,
+    current_user: User = Depends(get_current_active_user)
+):
     """Analyze an uploaded video and return traffic flow, congestion, and priority recommendations."""
     video_path = UPLOAD_DIR / request.video_name
     
@@ -30,7 +35,8 @@ async def process_video(request: ProcessRequest):
             max_frames=request.max_frames,
             skip_frames=request.skip_frames,
             vehicle_confidence=request.vehicle_confidence,
-            ambulance_confidence=request.ambulance_confidence
+            ambulance_confidence=request.ambulance_confidence,
+            user_id=current_user.id
         )
         
         # Base64 encode the latest frame if it exists

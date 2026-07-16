@@ -2,17 +2,22 @@
 
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends
 from backend.core.config import UPLOAD_DIR
 from backend.core.logger import logger
 from backend.schemas.schemas import UploadResponse
+from backend.auth.security import get_current_active_user
+from backend.models.user import User
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
 SUPPORTED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
 @router.post("", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_video(file: UploadFile = File(...)):
+async def upload_video(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user)
+):
     """Upload a video file to the server for analysis."""
     filename = Path(file.filename).name
     file_extension = Path(filename).suffix.lower()

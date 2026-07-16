@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.core.logger import logger
 from backend.api.routes import upload, processing, analytics, history, results
+from backend.auth import auth_routes
 
 app = FastAPI(
     title="TrafficIQ API",
@@ -38,6 +39,7 @@ app.include_router(processing.router)
 app.include_router(analytics.router)
 app.include_router(history.router)
 app.include_router(results.router)
+app.include_router(auth_routes.router)
 
 @app.get("/", tags=["Root"])
 async def root():

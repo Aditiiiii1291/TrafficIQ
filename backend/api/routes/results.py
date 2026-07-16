@@ -8,15 +8,24 @@ from backend.database.session import get_db
 from backend.repositories.processing_repository import ProcessingRepository
 from backend.schemas.schemas import HistoricalRecordModel
 
+from backend.auth.security import get_current_active_user
+from backend.models.user import User
+
 router = APIRouter(prefix="/results", tags=["Results"])
 
 @router.get("/{record_id}", response_model=HistoricalRecordModel)
-async def get_results(record_id: str, db: Session = Depends(get_db)):
+async def get_results(
+    record_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Retrieve details of a specific analysis run by its timestamp ID from the database."""
     decoded_id = urllib.parse.unquote(record_id)
-    logger.info(f"Looking up database results for ID: {decoded_id}")
+    logger.info(f"Looking up database results for ID: {decoded_id} for user {current_user.email}")
     try:
-        results = ProcessingRepository.get_all_processing_results(db=db)
+        # Load user-specific or all results based on role
+        user_id = None if current_user.role.lower() == "admin" else current_user.id
+        results = ProcessingRepository.get_all_processing_results(db=db, user_id=user_id)
         matching_result = None
         
         for res in results:

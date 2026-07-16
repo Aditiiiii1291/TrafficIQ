@@ -54,10 +54,15 @@ class ProcessingRepository:
         db: Session,
         date_filter: str | None = None,
         congestion_level: str = "ALL",
-        recommendation: str = "ALL"
+        recommendation: str = "ALL",
+        user_id: int | None = None
     ) -> list[ProcessingResult]:
-        """Query and filter historical processing runs."""
+        """Query and filter historical processing runs, optionally filtering by user_id."""
+        from backend.models.video import Video
         query = db.query(ProcessingResult)
+        
+        if user_id is not None:
+            query = query.join(Video).filter(Video.user_id == user_id)
         
         if congestion_level != "ALL":
             query = query.filter(ProcessingResult.congestion_level == congestion_level)

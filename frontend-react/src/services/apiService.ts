@@ -5,7 +5,13 @@ import type {
   ProcessingResult,
   AnalyticsResponse,
   HistoryResponse,
-  HistoricalRecordModel
+  HistoricalRecordModel,
+  UserCreate,
+  UserLogin,
+  UserUpdate,
+  UserPasswordChange,
+  UserResponse,
+  TokenResponse
 } from '../types';
 
 export class ApiService {
@@ -49,6 +55,41 @@ export class ApiService {
 
   static async getResult(id: string): Promise<HistoricalRecordModel> {
     const response = await client.get<HistoricalRecordModel>(`/results/${encodeURIComponent(id)}`);
+    return response.data;
+  }
+
+  static async register(user: UserCreate): Promise<UserResponse> {
+    const response = await client.post<UserResponse>('/auth/register', user);
+    return response.data;
+  }
+
+  static async login(credentials: UserLogin): Promise<TokenResponse> {
+    const response = await client.post<TokenResponse>('/auth/login', credentials);
+    return response.data;
+  }
+
+  static async logout(): Promise<any> {
+    const response = await client.post('/auth/logout');
+    return response.data;
+  }
+
+  static async getMe(): Promise<UserResponse> {
+    const response = await client.get<UserResponse>('/auth/me');
+    return response.data;
+  }
+
+  static async updateProfile(profile: UserUpdate): Promise<UserResponse> {
+    const response = await client.put<UserResponse>('/auth/profile', profile);
+    return response.data;
+  }
+
+  static async changePassword(pwd: UserPasswordChange): Promise<any> {
+    const response = await client.put('/auth/change-password', pwd);
+    return response.data;
+  }
+
+  static async deleteAccount(): Promise<any> {
+    const response = await client.delete('/auth/account');
     return response.data;
   }
 }

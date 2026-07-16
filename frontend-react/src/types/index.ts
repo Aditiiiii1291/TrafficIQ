@@ -117,3 +117,39 @@ export interface HistoryResponse {
   records: HistoricalRecordModel[];
   total_records: number;
 }
+
+export interface UserCreate {
+  full_name: string;
+  email: string;
+  password?: string;
+}
+
+export interface UserLogin {
+  email: string;
+  password?: string;
+}
+
+export interface UserUpdate {
+  full_name: string;
+  email: string;
+}
+
+export interface UserPasswordChange {
+  old_password?: string;
+  new_password?: string;
+}
+
+export interface UserResponse {
+  id: number;
+  full_name: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  user: UserResponse;
+}

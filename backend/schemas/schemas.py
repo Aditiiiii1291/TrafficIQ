@@ -111,3 +111,40 @@ class HistoricalRecordModel(BaseModel):
 class HistoryResponse(BaseModel):
     records: List[HistoricalRecordModel]
     total_records: int
+
+# Authentication Schemas
+from datetime import datetime
+
+class UserCreate(BaseModel):
+    full_name: str
+    email: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+class UserUpdate(BaseModel):
+    full_name: str
+    email: str
+
+class UserPasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+
+class UserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+

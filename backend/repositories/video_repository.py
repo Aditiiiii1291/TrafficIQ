@@ -7,9 +7,9 @@ class VideoRepository:
     """Manages database operations for the Video table."""
 
     @staticmethod
-    def create_video(db: Session, filename: str) -> Video:
+    def create_video(db: Session, filename: str, user_id: int | None = None) -> Video:
         """Create a new video log entry."""
-        video = Video(filename=filename, status="uploaded")
+        video = Video(filename=filename, user_id=user_id, status="uploaded")
         db.add(video)
         db.commit()
         db.refresh(video)
