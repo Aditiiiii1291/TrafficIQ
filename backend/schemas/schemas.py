@@ -75,6 +75,7 @@ class ProcessingResult(BaseModel):
     ambulance_reason: str
     processed_video_location: Optional[str] = None
     latest_frame_b64: Optional[str] = None
+    timestamp: Optional[str] = None
 
 # Analytics schemas
 class TrafficStats(BaseModel):

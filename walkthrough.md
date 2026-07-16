@@ -1,74 +1,57 @@
-# Walkthrough - Phase 4: PostgreSQL Integration
+# Walkthrough - Phase 5: React Frontend
 
-We have successfully completed **Phase 4: PostgreSQL Integration** of the TrafficIQ roadmap. The application now uses a robust persistence layer configured via SQLAlchemy ORM, supported by Alembic database schema migrations. 
+We have successfully completed **Phase 5: React Frontend** of the TrafficIQ development roadmap. The legacy Streamlit frontend has been replaced with a high-performance, modern React 19 web application built using Vite, TypeScript, and Tailwind CSS v4.
 
-The application loads configuration dynamically from environment variables, defaulting to a local SQLite database for local execution and offline compatibility, while supporting production PostgreSQL deployments out-of-the-box.
+The React frontend communicates exclusively with the FastAPI REST API using Axios and TanStack Query, leaving the core AI models, databases, and business services completely untouched.
+
+## Architecture & Structure
+
+Scaffolded project structure under `frontend-react/`:
+- **`src/api/`:** Creates a reusable, configured Axios client (`client.ts`) pointing to `http://127.0.0.1:8000`.
+- **`src/types/`:** Contains full TypeScript interfaces matching the Pydantic REST models (`index.ts`).
+- **`src/services/`:** Encapsulates service requests for REST actions (`apiService.ts`).
+- **`src/layouts/`:** Hosts the core application shell (`DashboardLayout.tsx`), complete with sidebar and responsive mobile views.
+- **`src/pages/`:** Houses modular, premium dashboard pages:
+  - `Dashboard.tsx`: Displays summary statistics cards, recent activities, and preemption overrides.
+  - `UploadVideo.tsx`: Supports drag-and-drop video uploads, format verification, and Yolo processing configurations.
+  - `Results.tsx`: Renders full processing analysis reports, vehicle counts, lane lists, and preemption recommendations.
+  - `Analytics.tsx`: Integrates Recharts charts showing vehicle timelines, densities, and congestion shares.
+  - `History.tsx`: Displays historical run lists with search, congestion level, and recommendation dropdown filters.
+  - `NotFound.tsx`: Renders the default 404 page.
 
 ## Changes Made
 
-### 1. Database Connectivity and Sessions Setup
-- Created `backend/database/database.py` which loads configuration from the `.env` file, initializes the database engine, and exports the SQLAlchemy declarative base.
-- Created `backend/database/session.py` to establish the `SessionLocal` factory and export the `get_db()` session dependency provider.
-- Consolidated database models inside `backend/database/base.py` to support Alembic autogenerate metadata.
+### 1. Created React 19 Frontend Project (`frontend-react/`)
+- Scaffolder: Vite + TypeScript + React templates.
+- Configured Vite with `@tailwindcss/vite` compiler plugin for native Tailwind CSS v4 styling.
+- Installed `react-router-dom`, `axios`, `@tanstack/react-query`, `recharts`, and `lucide-react`.
 
-### 2. Created Database Models (`backend/models/`)
-- **`video.py` (`Video` table):** Tracks uploaded videos (filename, upload time, processing status, duration, processing duration).
-- **`processing.py` (`ProcessingResult` table):** Stores overall summary metrics for analysis runs (video ID relation, emergency detection, congestion levels, signal recommendations, creation timestamps).
-- **`detection.py` (`VehicleDetection` table):** Stores bounding box object records (class names, confidence scores, frame indices, logs timestamps).
-- **`analytics.py` (`AnalyticsSummary` table):** Stores aggregated run summaries (total vehicle count, emergency count, lane utilization statistics list as JSON, overall congestion score).
+### 2. Configured Tailwind CSS v4 Styles
+- Overwrote `src/index.css` using `@import "tailwindcss";` directives and configured base body overlays.
+- Created premium glassmorphism layouts (`backdrop-blur-md bg-slate-900/60 border border-slate-800`), custom scroll bars, and gradient badges.
 
-### 3. Created Repository Layer (`backend/repositories/`)
-- Implemented repository classes encapsulating database CRUD operations, ensuring API routes contain no direct SQL or SQLAlchemy queries:
-  - `VideoRepository` (`create_video`, `get_video_by_filename`, `update_video_status`).
-  - `ProcessingRepository` (`create_processing_result`, `create_detections`, `get_all_processing_results`).
-  - `AnalyticsRepository` (`create_analytics_summary`, `get_analytics_summaries`).
+### 3. Integrated State Management and API Services
+- Implemented TanStack Query (`App.tsx`) to manage cache lifecycles, query keys, and polling routines for recent activities.
 
-### 4. Integrated Database Persistence into Services
-- Updated `backend/services/video_processor.py` to:
-  - Record the uploaded video log in the database (marked as `processing`).
-  - Upon run completion, update the status to `completed` and save performance metrics (video duration and processing duration).
-  - Bulk save individual vehicle detections.
-  - Save overall run metrics as a `ProcessingResult`.
-  - Save lane details and congestion metrics in `AnalyticsSummary`.
-  - Kept CSV file logging active as a fallback.
-
-### 5. Updated API Routers
-- Refactored `history.py`, `analytics.py`, and `results.py` to query run details from the database using dependency injected database sessions.
-
-### 6. Created Environment Configuration
-- Added `.env` file containing `DATABASE_URL=sqlite:///./trafficiq.db`.
-
-### 7. Configured Alembic Migrations
-- Initialized Alembic directory inside `backend/migrations/`.
-- Configured `backend/migrations/env.py` to dynamically load the database connection URL from `.env` and map `target_metadata` to the declarative Base.
-- Generated the initial autogenerated schema migration revision (`9e2d88cb637b_initial_schema.py`).
-- Executed `alembic upgrade head` to build the database schema.
-
-### 8. Updated requirements.txt
-- Appended `SQLAlchemy`, `alembic`, `psycopg2-binary`, and `python-dotenv` packages.
+### 4. Back-End Synchronization
+- Added timestamp returns to `video_processor.py` results to support client-side redirection to generated report pages.
+- Registered the `timestamp` field in `ProcessingResult` Pydantic models.
 
 ## Verification Results
 
-### 1. Automated Test Suite
-Ran `pytest` post-refactoring. All **91 test cases passed** successfully:
+### 1. Build Verification
+Ran the production compiler checks and build routines:
+```powershell
+npm run build
+```
+- **Result:** **Success!** Compiles and packages assets into the `dist/` directory cleanly in 1.82s without any TypeScript or compilation errors.
 ```text
-====================== 91 passed, 14 warnings in 10.59s =======================
+dist/index.html                   0.46 kB │ gzip:   0.29 kB
+dist/assets/index-GqQzFsSW.css   44.39 kB │ gzip:   7.39 kB
+dist/assets/index-DuKYgQiI.js   746.31 kB │ gzip: 221.79 kB
+✓ built in 1.82s
 ```
 
-### 2. Alembic Migration Upgrade
-Executed schema upgrades successfully:
-```text
-INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
-INFO  [alembic.runtime.migration] Running upgrade  -> 9e2d88cb637b, Initial schema
-```
-
-### 3. API Database Query Validation
-Ran the FastAPI server and queried the `GET /history` REST endpoint. It successfully queried the database and returned:
-```json
-{"records":[],"total_records":0}
-```
-The server correctly log output:
-```text
-trafficiq - INFO - Fetching history logs from DB (date=None, congestion=ALL, recommendation=ALL)
-INFO:     127.0.0.1:59760 - "GET /history HTTP/1.1" 200 OK
-```
+### 2. API Communication Validation
+- Verified standard CORS configurations in the FastAPI application allow requests from the Vite development server (`http://localhost:5173`).
+- Verified query parameters pass seamlessly for date, congestion, and preemption action filtering.

@@ -236,6 +236,7 @@ def analyze_video(
             "ambulance_confidence": frame_summary.get("confidence", 0.0),
             "emergency_light_score": frame_summary.get("emergency_light_score", 0.0),
             "ambulance_reason": "; ".join(frame_summary.get("reason", [])) if frame_summary.get("reason") else "No vehicle candidates detected",
+            "timestamp": run_start_time.isoformat(timespec="milliseconds") + "Z"
         }
 
         # Collect log rows
