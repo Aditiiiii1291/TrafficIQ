@@ -15,10 +15,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.core.config import UPLOAD_DIR, LOGS_DIR, CONGESTION_PREDICTOR_PATH
+from backend.core.config import UPLOAD_DIR, LOGS_DIR, CONGESTION_PREDICTOR_PATH, API_BASE_URL
 from backend.core.logger import setup_logger
 from backend.services.prediction_service import CongestionPredictionService
 from backend.services.video_processor import analyze_video
+import requests
+import base64
+import numpy as np
+import cv2
 
 
 @dataclass(frozen=True)
@@ -268,8 +272,37 @@ def analyze_uploaded_video(
     vehicle_confidence: float,
     ambulance_confidence: float,
 ) -> dict[str, Any]:
-    """Delegate to backend video processing service."""
+    """Delegate to backend video processing service via FastAPI REST API with local fallback."""
     with st.spinner("Analyzing uploaded video..."):
+        try:
+            payload = {
+                "video_name": video_path.name,
+                "max_frames": max_frames,
+                "skip_frames": skip_frames,
+                "vehicle_confidence": vehicle_confidence,
+                "ambulance_confidence": ambulance_confidence,
+            }
+            response = requests.post(f"{API_BASE_URL}/process", json=payload, timeout=120)
+            if response.status_code == 200:
+                res_data = response.json()
+                latest_frame = None
+                b64_str = res_data.get("latest_frame_b64")
+                if b64_str:
+                    try:
+                        img_data = base64.b64decode(b64_str)
+                        nparr = np.frombuffer(img_data, np.uint8)
+                        latest_frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        latest_frame = cv2.cvtColor(latest_frame_bgr, cv2.COLOR_BGR2RGB)
+                    except Exception as decode_err:
+                        setup_logger().warning(f"Failed to decode base64 latest_frame: {decode_err}")
+                
+                res_data["latest_frame"] = latest_frame
+                return res_data
+            else:
+                setup_logger().warning(f"API processing returned status code {response.status_code}. Falling back to local processor.")
+        except Exception as error:
+            setup_logger().warning(f"FastAPI connection failed ({error}). Falling back to local processor.")
+            
         return analyze_video(
             video_path=video_path,
             max_frames=max_frames,
@@ -427,13 +460,60 @@ def render_historical_analytics(
 
     st.subheader("Historical Analytics")
     import backend.services.analytics_service as analytics_service
-    records = analytics_service.load_historical_records(LOGS_DIR)
-    filtered_records = analytics_service.filter_records(
-        records,
-        date_filter=date_filter or None,
-        congestion_level=congestion_filter,
-        recommendation=recommendation_filter,
-    )
+    from ml.analytics.history_analytics import HistoricalRecord
+    
+    records = []
+    filtered_records = []
+    
+    try:
+        all_hist_resp = requests.get(f"{API_BASE_URL}/history", params={"congestion_level": "ALL", "recommendation": "ALL"}, timeout=10)
+        if all_hist_resp.status_code == 200:
+            records = [
+                HistoricalRecord(
+                    timestamp=r["timestamp"],
+                    total_vehicles=r["total_vehicles"],
+                    density=r["density"],
+                    congestion=r["congestion"],
+                    emergency_present=r["emergency_present"],
+                    recommended_action=r["recommended_action"]
+                )
+                for r in all_hist_resp.json()["records"]
+            ]
+            
+            filt_hist_resp = requests.get(
+                f"{API_BASE_URL}/history",
+                params={
+                    "date_filter": date_filter or None,
+                    "congestion_level": congestion_filter,
+                    "recommendation": recommendation_filter
+                },
+                timeout=10
+            )
+            if filt_hist_resp.status_code == 200:
+                filtered_records = [
+                    HistoricalRecord(
+                        timestamp=r["timestamp"],
+                        total_vehicles=r["total_vehicles"],
+                        density=r["density"],
+                        congestion=r["congestion"],
+                        emergency_present=r["emergency_present"],
+                        recommended_action=r["recommended_action"]
+                    )
+                    for r in filt_hist_resp.json()["records"]
+                ]
+            else:
+                raise Exception("Filtered history API request failed")
+        else:
+            raise Exception("All history API request failed")
+    except Exception as error:
+        setup_logger().warning(f"FastAPI connection failed for historical data ({error}). Falling back to local services.")
+        records = analytics_service.load_historical_records(LOGS_DIR)
+        filtered_records = analytics_service.filter_records(
+            records,
+            date_filter=date_filter or None,
+            congestion_level=congestion_filter,
+            recommendation=recommendation_filter,
+        )
 
     if not records:
         st.info("No historical logs found yet. Run the detection, density, congestion, and priority pipelines to generate analytics.")
