@@ -1,70 +1,74 @@
-# Walkthrough - Phase 3: FastAPI Backend
+# Walkthrough - Phase 4: PostgreSQL Integration
 
-We have successfully implemented **Phase 3: FastAPI Backend** of the TrafficIQ roadmap. The project's business services (video processing, log collections, historical metrics, and analytics calculations) are now fully exposed through a production-ready FastAPI REST API.
+We have successfully completed **Phase 4: PostgreSQL Integration** of the TrafficIQ roadmap. The application now uses a robust persistence layer configured via SQLAlchemy ORM, supported by Alembic database schema migrations. 
 
-Streamlit is integrated with these REST endpoints, using standard HTTP API requests with local offline services fallback.
+The application loads configuration dynamically from environment variables, defaulting to a local SQLite database for local execution and offline compatibility, while supporting production PostgreSQL deployments out-of-the-box.
 
 ## Changes Made
 
-### 1. Created FastAPI Application Entry Point (`backend/api/main.py`)
-- Initialized the FastAPI application.
-- Configured CORS middleware to allow cross-origin integrations.
-- Configured unhandled exceptions handler middleware to route API errors to the centralized logging module.
-- Mounted route subpackages for file uploading, video analysis, analytics metrics, and histories.
+### 1. Database Connectivity and Sessions Setup
+- Created `backend/database/database.py` which loads configuration from the `.env` file, initializes the database engine, and exports the SQLAlchemy declarative base.
+- Created `backend/database/session.py` to establish the `SessionLocal` factory and export the `get_db()` session dependency provider.
+- Consolidated database models inside `backend/database/base.py` to support Alembic autogenerate metadata.
 
-### 2. Created API Endpoints and Routers
-- **`POST /upload` (`backend/api/routes/upload.py`):**
-  - Handles uploading of raw traffic video streams.
-  - Validates file extensions (`.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`) and writes raw files to `UPLOAD_DIR`.
-  - Returns upload metadata (filename, absolute path, file size in bytes).
-- **`POST /process` (`backend/api/routes/processing.py`):**
-  - Invokes `backend/services/video_processor.py` to run YOLO and ambulance detections, signal recommendations, and analytics.
-  - Encodes the final frame to JPEG and base64 to include it in the REST JSON response (`latest_frame_b64`).
-- **`GET /analytics` (`backend/api/routes/analytics.py`):**
-  - Aggregates historical metrics (vehicle count timelines, congestion and density distributions, emergency rates).
-- **`GET /history` (`backend/api/routes/history.py`):**
-  - Exposes logs run history with support for date, congestion, and recommendation queries.
-- **`GET /results/{record_id}` (`backend/api/routes/results.py`):**
-  - Retrieves a specific analysis run record matching the URL-decoded timestamp ID.
+### 2. Created Database Models (`backend/models/`)
+- **`video.py` (`Video` table):** Tracks uploaded videos (filename, upload time, processing status, duration, processing duration).
+- **`processing.py` (`ProcessingResult` table):** Stores overall summary metrics for analysis runs (video ID relation, emergency detection, congestion levels, signal recommendations, creation timestamps).
+- **`detection.py` (`VehicleDetection` table):** Stores bounding box object records (class names, confidence scores, frame indices, logs timestamps).
+- **`analytics.py` (`AnalyticsSummary` table):** Stores aggregated run summaries (total vehicle count, emergency count, lane utilization statistics list as JSON, overall congestion score).
 
-### 3. Integrated Pydantic Schemas (`backend/schemas/schemas.py`)
-- Implemented Pydantic models for validation, reuse, and documentation:
-  - `UploadResponse`
-  - `ProcessRequest`
-  - `LaneResult`, `GreenCorridorSequenceItem`, `GreenCorridorResult`, and `ProcessingResult` (with base64 frame support).
-  - `TrafficStats`, `TrendData`, `EventStats`, and `AnalyticsResponse`.
-  - `HistoricalRecordModel` and `HistoryResponse`.
+### 3. Created Repository Layer (`backend/repositories/`)
+- Implemented repository classes encapsulating database CRUD operations, ensuring API routes contain no direct SQL or SQLAlchemy queries:
+  - `VideoRepository` (`create_video`, `get_video_by_filename`, `update_video_status`).
+  - `ProcessingRepository` (`create_processing_result`, `create_detections`, `get_all_processing_results`).
+  - `AnalyticsRepository` (`create_analytics_summary`, `get_analytics_summaries`).
 
-### 4. Refactored Streamlit Interface (`frontend/app.py`)
-- Integrated API consumption inside `analyze_uploaded_video` and `render_historical_analytics` to perform REST requests against the FastAPI server.
-- Built a fallback pattern: if the FastAPI backend is offline, the Streamlit app automatically logs the connection warning and executes the request using local backend services, guaranteeing 100% offline functionality.
+### 4. Integrated Database Persistence into Services
+- Updated `backend/services/video_processor.py` to:
+  - Record the uploaded video log in the database (marked as `processing`).
+  - Upon run completion, update the status to `completed` and save performance metrics (video duration and processing duration).
+  - Bulk save individual vehicle detections.
+  - Save overall run metrics as a `ProcessingResult`.
+  - Save lane details and congestion metrics in `AnalyticsSummary`.
+  - Kept CSV file logging active as a fallback.
 
-### 5. Configured API Dependencies (`backend/api/dependencies.py`)
-- Setup logger providers for route dependencies.
+### 5. Updated API Routers
+- Refactored `history.py`, `analytics.py`, and `results.py` to query run details from the database using dependency injected database sessions.
 
-### 6. Updated Dependencies (`requirements.txt`)
-- Added `fastapi`, `uvicorn`, and `python-multipart` to project requirements.
+### 6. Created Environment Configuration
+- Added `.env` file containing `DATABASE_URL=sqlite:///./trafficiq.db`.
+
+### 7. Configured Alembic Migrations
+- Initialized Alembic directory inside `backend/migrations/`.
+- Configured `backend/migrations/env.py` to dynamically load the database connection URL from `.env` and map `target_metadata` to the declarative Base.
+- Generated the initial autogenerated schema migration revision (`9e2d88cb637b_initial_schema.py`).
+- Executed `alembic upgrade head` to build the database schema.
+
+### 8. Updated requirements.txt
+- Appended `SQLAlchemy`, `alembic`, `psycopg2-binary`, and `python-dotenv` packages.
 
 ## Verification Results
 
-### 1. Automated Test Suites
-Ran `pytest` to verify the codebase after route integrations. All **91 test cases passed** successfully:
+### 1. Automated Test Suite
+Ran `pytest` post-refactoring. All **91 test cases passed** successfully:
 ```text
-======================= 91 passed, 14 warnings in 8.55s =======================
+====================== 91 passed, 14 warnings in 10.59s =======================
 ```
 
-### 2. FastAPI Service Startup
-Launched the uvicorn service:
-```powershell
-.venv\Scripts\python -m uvicorn backend.api.main:app --port 8000
-```
-- The server launched successfully:
+### 2. Alembic Migration Upgrade
+Executed schema upgrades successfully:
 ```text
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Running upgrade  -> 9e2d88cb637b, Initial schema
 ```
-- Sent health query to `GET /` which returned:
+
+### 3. API Database Query Validation
+Ran the FastAPI server and queried the `GET /history` REST endpoint. It successfully queried the database and returned:
 ```json
-{"app":"TrafficIQ API","status":"healthy","version":"1.0.0"}
+{"records":[],"total_records":0}
 ```
-- Verified Swagger UI page loads correctly at `http://127.0.0.1:8000/docs`.
+The server correctly log output:
+```text
+trafficiq - INFO - Fetching history logs from DB (date=None, congestion=ALL, recommendation=ALL)
+INFO:     127.0.0.1:59760 - "GET /history HTTP/1.1" 200 OK
+```

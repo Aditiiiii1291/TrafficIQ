@@ -1,7 +1,7 @@
 """Video processing service for TrafficIQ.
 
 This service encapsulates all core computer vision, object detection, and 
-analytics pipeline logic, decoupling the UI from execution.
+analytics pipeline logic, decoupling the UI from execution, and persisting results to PostgreSQL/SQLite.
 """
 
 from datetime import datetime, timedelta
@@ -14,6 +14,13 @@ import cv2
 from backend.core.config import CONGESTION_PREDICTOR_PATH
 from backend.services.prediction_service import CongestionPredictionService
 import backend.services.log_service as log_service
+
+# Database dependencies
+from backend.database.session import SessionLocal
+from backend.repositories.video_repository import VideoRepository
+from backend.repositories.processing_repository import ProcessingRepository
+from backend.repositories.analytics_repository import AnalyticsRepository
+from backend.core.logger import logger
 
 # Direct imports from ML modules
 from ml.cv_pipeline import get_video_metadata, iter_frames
@@ -76,11 +83,21 @@ def analyze_video(
     vehicle_confidence: float,
     ambulance_confidence: float,
 ) -> dict[str, Any]:
-    """Run a bounded computer vision and analytics pipeline pass over a video file."""
+    """Run a bounded computer vision and analytics pipeline pass over a video file, saving run details to the database."""
     metadata = get_video_metadata(video_path)
     vehicle_model = load_yolo_model()
     prediction_service = CongestionPredictionService(CONGESTION_PREDICTOR_PATH)
     prediction_service.load_predictor()
+
+    db = SessionLocal()
+    try:
+        video = VideoRepository.get_video_by_filename(db, video_path.name)
+        if not video:
+            video = VideoRepository.create_video(db, video_path.name)
+        VideoRepository.update_video_status(db, video.id, "processing")
+    except Exception as db_err:
+        logger.error(f"Failed to create video record in database: {db_err}")
+        video = None
 
     ambulance_model = None
     ambulance_model_path = resolve_ambulance_model_path()
@@ -283,5 +300,49 @@ def analyze_video(
     log_service.log_density_analysis(density_rows)
     log_service.log_congestion_analysis(congestion_rows)
     log_service.log_priority_actions(priority_rows)
+
+    # Persist results to PostgreSQL/SQLite
+    if video:
+        try:
+            processing_time_sec = (datetime.now() - run_start_time).total_seconds()
+            VideoRepository.update_video_status(
+                db=db,
+                video_id=video.id,
+                status="completed",
+                duration=metadata.duration_seconds,
+                processing_time=processing_time_sec
+            )
+            
+            proc_result = ProcessingRepository.create_processing_result(
+                db=db,
+                video_id=video.id,
+                emergency_detected=results["emergency_present"],
+                congestion_level=results["congestion"],
+                signal_recommendation=results["recommended_action"]
+            )
+            
+            # Save vehicle detections to DB
+            ProcessingRepository.create_detections(db, proc_result.id, vehicle_det_rows)
+            
+            # Calculate mock/derived congestion score
+            congestion_score = float(results["total_vehicles"]) / max(1.0, results["total_vehicles"] + 10.0)
+            
+            # Save analytics summary to DB
+            AnalyticsRepository.create_analytics_summary(
+                db=db,
+                processing_id=proc_result.id,
+                vehicle_count=results["total_vehicles"],
+                emergency_count=1 if results["emergency_present"] else 0,
+                lane_statistics=results["lane_results"],
+                congestion_score=congestion_score
+            )
+            logger.info(f"Successfully persisted analysis run for video id {video.id} to database.")
+        except Exception as persist_error:
+            logger.error(f"Error persisting processing results to DB: {persist_error}")
+            db.rollback()
+        finally:
+            db.close()
+    else:
+        db.close()
 
     return results
