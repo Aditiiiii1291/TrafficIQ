@@ -15,7 +15,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UPLOAD_DIR = PROJECT_ROOT / "data" / "raw"
+from backend.core.config import UPLOAD_DIR, LOGS_DIR, CONGESTION_PREDICTOR_PATH
+from backend.core.logger import setup_logger
+from backend.services.prediction_service import CongestionPredictionService
 
 
 @dataclass(frozen=True)
@@ -273,10 +275,8 @@ def analyze_uploaded_video(
 
     metadata = imports.get_video_metadata(video_path)
     vehicle_model = imports.load_yolo_model()
-    prediction_model = None
-    model_path = PROJECT_ROOT / "data" / "models" / "congestion_predictor.pkl"
-    if model_path.exists():
-        prediction_model = imports.load_congestion_model(model_path)
+    prediction_service = CongestionPredictionService(CONGESTION_PREDICTOR_PATH)
+    prediction_service.load_predictor()
 
     ambulance_model = None
     ambulance_model_path = imports.resolve_ambulance_model_path()
@@ -341,15 +341,12 @@ def analyze_uploaded_video(
                 congestion_result=congestion_result,
                 priority_result=action_result,
             )
-            predicted_congestion = "Model not trained"
-            if prediction_model is not None:
-                predicted_congestion = imports.predict_congestion(
-                    prediction_model,
-                    {
-                        **density_result,
-                        "emergency_present": emergency_present,
-                    },
-                )
+            predicted_congestion = prediction_service.predict(
+                {
+                    **density_result,
+                    "emergency_present": emergency_present,
+                }
+            )
 
             frame_height, frame_width = frame.shape[:2]
             lane_regions = imports.default_lane_config(frame_width=frame_width, frame_height=frame_height)
@@ -481,35 +478,13 @@ def analyze_uploaded_video(
                 "recommended_action": action_result["recommended_action"],
             })
 
-    # Append collected logs to disk
-    vehicle_det_fields = [
-        "source_video", "frame_index", "timestamp_seconds", "class_id",
-        "class_name", "confidence", "xmin", "ymin", "xmax", "ymax",
-        "box_width", "box_height", "timestamp"
-    ]
-    density_fields = [
-        "source_video", "frame_index", "timestamp_seconds", "total_vehicles",
-        "car_count", "motorcycle_count", "bus_count", "truck_count", "density", "timestamp"
-    ]
-    congestion_fields = ["timestamp", "total_vehicles", "density", "congestion"]
-    priority_fields = ["timestamp", "emergency_present", "density", "congestion", "recommended_action"]
-
-    def append_rows_to_csv(file_name: str, fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
-        if not rows:
-            return
-        file_path = logs_dir / file_name
-        file_exists = file_path.exists()
-        with file_path.open("a", newline="", encoding="utf-8") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerows(rows)
-
-    append_rows_to_csv("vehicle_detections.csv", vehicle_det_fields, vehicle_det_rows)
-    append_rows_to_csv("emergency_detections.csv", vehicle_det_fields, emergency_det_rows)
-    append_rows_to_csv("density_analysis.csv", density_fields, density_rows)
-    append_rows_to_csv("congestion_analysis.csv", congestion_fields, congestion_rows)
-    append_rows_to_csv("priority_actions.csv", priority_fields, priority_rows)
+    # Append collected logs to disk using backend log_service
+    import backend.services.log_service as log_service
+    log_service.log_vehicle_detections(vehicle_det_rows)
+    log_service.log_emergency_detections(emergency_det_rows)
+    log_service.log_density_analysis(density_rows)
+    log_service.log_congestion_analysis(congestion_rows)
+    log_service.log_priority_actions(priority_rows)
 
     return results
 
@@ -661,8 +636,9 @@ def render_historical_analytics(
     import pandas as pd
 
     st.subheader("Historical Analytics")
-    records = imports.load_historical_records(PROJECT_ROOT / "data" / "logs")
-    filtered_records = imports.filter_records(
+    import backend.services.analytics_service as analytics_service
+    records = analytics_service.load_historical_records(LOGS_DIR)
+    filtered_records = analytics_service.filter_records(
         records,
         date_filter=date_filter or None,
         congestion_level=congestion_filter,
@@ -673,9 +649,9 @@ def render_historical_analytics(
         st.info("No historical logs found yet. Run the detection, density, congestion, and priority pipelines to generate analytics.")
         return
 
-    summary = imports.generate_summary(filtered_records)
-    trend_data = imports.generate_trend_data(filtered_records)
-    event_stats = imports.generate_event_statistics(filtered_records)
+    summary = analytics_service.generate_summary(filtered_records)
+    trend_data = analytics_service.generate_trend_data(filtered_records)
+    event_stats = analytics_service.generate_event_statistics(filtered_records)
 
     metric_cols = st.columns(4)
     with metric_cols[0]:
@@ -715,7 +691,7 @@ def render_historical_analytics(
 def main() -> None:
     """Run the Streamlit dashboard."""
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    setup_logger("trafficiq_frontend")
     configure_page()
 
     st.title("TrafficIQ Dashboard")
